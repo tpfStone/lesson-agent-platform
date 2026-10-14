@@ -1,0 +1,34 @@
+CREATE TABLE platform_user (
+    id CHAR(26) PRIMARY KEY,
+    username VARCHAR(64) NOT NULL,
+    password_hash VARCHAR(255) NOT NULL,
+    display_name VARCHAR(100) NOT NULL,
+    role VARCHAR(16) NOT NULL,
+    status VARCHAR(16) NOT NULL,
+    created_at TIMESTAMP(6) NOT NULL,
+    updated_at TIMESTAMP(6) NOT NULL,
+    last_login_at TIMESTAMP(6) NULL,
+    CONSTRAINT uk_platform_user_username UNIQUE (username)
+);
+
+CREATE TABLE platform_login_audit (
+    id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    user_id CHAR(26) NULL,
+    username_attempted VARCHAR(64) NOT NULL,
+    success BOOLEAN NOT NULL,
+    client_ip VARCHAR(64) NULL,
+    created_at TIMESTAMP(6) NOT NULL,
+    CONSTRAINT fk_login_audit_user FOREIGN KEY (user_id) REFERENCES platform_user(id)
+);
+
+INSERT INTO platform_user
+    (id, username, password_hash, display_name, role, status, created_at, updated_at)
+VALUES
+    ('00000000000000000000000000', 'legacy_system', '!', '历史数据', 'ADMIN', 'DISABLED', CURRENT_TIMESTAMP(6), CURRENT_TIMESTAMP(6));
+
+ALTER TABLE platform_lesson ADD COLUMN owner_user_id CHAR(26) NULL;
+UPDATE platform_lesson SET owner_user_id = '00000000000000000000000000' WHERE owner_user_id IS NULL;
+ALTER TABLE platform_lesson MODIFY owner_user_id CHAR(26) NOT NULL;
+CREATE INDEX idx_platform_lesson_owner_updated ON platform_lesson(owner_user_id, updated_at);
+ALTER TABLE platform_lesson
+    ADD CONSTRAINT fk_platform_lesson_owner FOREIGN KEY (owner_user_id) REFERENCES platform_user(id);

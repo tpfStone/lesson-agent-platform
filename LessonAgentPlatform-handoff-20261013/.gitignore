@@ -1,0 +1,81 @@
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+**/.api_key
+**/*.pem
+**/*.key
+**/*credentials*.json
+
+# Python environments and caches
+**/.venv/
+**/venv/
+**/__pycache__/
+**/*.py[cod]
+**/.pytest_cache/
+**/.mypy_cache/
+**/.ruff_cache/
+**/*.egg-info/
+
+# Java / Maven build and local dependency cache
+**/target/
+Lessongen-main/web/.mvn/repository/
+Lessongen-main/web/.mvn/wrapper/dists/
+
+# Node / Vue build output
+**/node_modules/
+**/dist/
+**/.vite/
+**/coverage/
+
+# Runtime data, logs and process files
+.runtime/
+**/logs/
+**/*.log
+Lessongen-main/web/var/
+Lessongen-main/paper4_pipeline/var/
+SimClass-main/runtime/
+System-v1.2/platform_runs/
+System-v1.2/platform_batches/
+System-v1.2/platform_comparisons/
+NoviceTeacher-AI-main/backend/*.db
+NoviceTeacher-AI-main/backend/*.db-shm
+NoviceTeacher-AI-main/backend/*.db-wal
+
+# F1 runtime output. Keep the two reviewed anchor assets.
+System-v1.2/output/*
+!System-v1.2/output/anchors/
+System-v1.2/output/anchors/*
+!System-v1.2/output/anchors/anchor_math.json
+!System-v1.2/output/anchors/anchor_english.json
+
+# User-uploaded lesson plans must not be committed
+System-v1.2/data/plans/*
+!System-v1.2/data/plans/.gitkeep
+
+# Temporary and backup files
+*.tmp
+*.temp
+*.bak
+*.backup
+*.orig
+*.swp
+*~
+_integration_backup/
+_f4-workbench-update/
+_f4-writeback-update*/
+
+# IDE / operating-system files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Local archives and database dumps
+*.zip
+*.7z
+*.rar
+*.sql.gz
+*.dump
+
