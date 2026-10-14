@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -u
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 SKIP_FRONTEND=0
 if [[ "${1:-}" == "--skip-frontend" ]]; then SKIP_FRONTEND=1; fi
@@ -23,11 +24,13 @@ for ((attempt=1; attempt<=retries; attempt++)); do
   failed=0
   results=()
   for i in "${!urls[@]}"; do
-    code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 5 "${urls[$i]}" 2>/dev/null || true)"
-    if [[ "$code" =~ ^2 ]]; then
-      results+=("${names[$i]}|UP|$code|${urls[$i]}")
+    response="$(curl -sS -w $'\n%{http_code}' --max-time 5 "${urls[$i]}" 2>/dev/null || true)"
+    code="${response##*$'\n'}"
+    body="${response%$'\n'*}"
+    if [[ "$code" =~ ^2 ]] && { [[ "${names[$i]}" == Frontend ]] || printf '%s' "$body" | python3 "$ROOT/scripts/health-status.py"; }; then
+      results+=("${names[$i]}|READY|$code|${urls[$i]}")
     else
-      results+=("${names[$i]}|DOWN|${code:-0}|${urls[$i]}")
+      results+=("${names[$i]}|NOT_READY|${code:-0}|${urls[$i]}")
       failed=1
     fi
   done

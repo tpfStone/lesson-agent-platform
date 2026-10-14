@@ -9,6 +9,30 @@ import org.junit.jupiter.api.Test;
 
 class LessonDocumentSupportTest {
     @Test
+    void markdownSeparatorIsNotTeachingRow() {
+        var document = LessonDocumentSupport.fromPlainText("""
+                | 教学环节 | 教师活动 | 学生活动 | 评价 |
+                | --- | :---: | --- | ---: |
+                | 导入（5分钟） | 提问 | 观察 | 诊断 |
+                | 探究（12分钟） | 指导 | 操作 | 反馈 |
+                """);
+        assertEquals(2, document.blocks().get(0).teachingProcess().rows().size());
+    }
+
+    @Test
+    void escapedPipeDoesNotSplitCell() {
+        var document = LessonDocumentSupport.fromPlainText("| 教师活动 | 学生活动 |\n| 比较 A\\|B | 讨论 |");
+        assertEquals(List.of("比较 A|B", "讨论"), document.blocks().get(0).tableRows().get(1));
+    }
+
+    @Test
+    void repeatedHeaderIsNotTeachingRow() {
+        var process = LessonDocumentSupport.teachingProcess(List.of(
+                List.of("教师活动", "学生活动"), List.of("提问", "回答"),
+                List.of("教师活动", "学生活动"), List.of("指导", "操作")));
+        assertEquals(2, process.rows().size());
+    }
+    @Test
     void recognizesChineseFormalTeachingProcessHeaders() {
         var process = LessonDocumentSupport.teachingProcess(List.of(
                 List.of("教学环节与教师活动", "学生学习任务与产出", "评价重点与调控"),

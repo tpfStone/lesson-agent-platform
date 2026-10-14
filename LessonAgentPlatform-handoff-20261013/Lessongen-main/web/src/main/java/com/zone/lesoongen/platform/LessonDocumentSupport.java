@@ -4,6 +4,9 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
+import java.util.Map;
+import java.util.LinkedHashMap;
+import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -46,7 +49,8 @@ public final class LessonDocumentSupport {
             if (looksLikePipeRow(line)) {
                 flushList(blocks, listItems, listOrdered, nextId);
                 listOrdered = null;
-                tableRows.add(parsePipeRow(line));
+                List<String> cells = parsePipeRow(line);
+                if (!isSeparator(cells)) tableRows.add(cells);
                 continue;
             }
             flushTable(blocks, tableRows, nextId);
@@ -79,12 +83,17 @@ public final class LessonDocumentSupport {
     }
 
     public static Block tableBlock(String id, List<List<String>> rows) {
-        TeachingProcess process = teachingProcess(rows);
+        List<String> rowIds = rows.stream().map(row -> "r-" + UUID.randomUUID()).toList();
+        TeachingProcess process = teachingProcess(rows, rowIds);
         return new Block(id, process == null ? "table" : "teaching_process", null, null,
-                null, List.of(), rows, process);
+                null, List.of(), rows, process, rowIds, columnBindings(rows));
     }
 
     public static TeachingProcess teachingProcess(List<List<String>> rows) {
+        return teachingProcess(rows, List.of());
+    }
+
+    public static TeachingProcess teachingProcess(List<List<String>> rows, List<String> rowIds) {
         if (rows == null || rows.size() < 2) return null;
         int headerIndex = -1;
         HeaderIndexes indexes = null;
@@ -101,12 +110,17 @@ public final class LessonDocumentSupport {
         List<TeachingProcessRow> result = new ArrayList<>();
         for (int rowIndex = headerIndex + 1; rowIndex < rows.size(); rowIndex++) {
             List<String> row = rows.get(rowIndex);
-            if (row.stream().allMatch(String::isBlank)) continue;
+            if (row.stream().allMatch(String::isBlank) || isSeparator(row)
+                    || row.stream().map(LessonDocumentSupport::normalizeHeader).toList()
+                            .equals(rows.get(headerIndex).stream().map(LessonDocumentSupport::normalizeHeader).toList())) continue;
             String teacher = cell(row, indexes.teacher());
             String student = cell(row, indexes.student());
             String evaluation = cell(row, indexes.evaluation());
+            if (teacher.isBlank() && student.isBlank() && evaluation.isBlank()) continue;
             String titleSource = indexes.section() >= 0 ? cell(row, indexes.section()) : teacher;
-            Matcher duration = DURATION.matcher(titleSource);
+            String durationSource = indexes.duration() >= 0 ? cell(row, indexes.duration()) : titleSource;
+            if (durationSource.matches("\\d{1,3}")) durationSource += "分钟";
+            Matcher duration = DURATION.matcher(durationSource);
             Integer minutes = duration.find() ? Integer.valueOf(duration.group(1)) : null;
             String title = firstParagraph(titleSource)
                     .replaceAll("(?i)[（(]?\\s*(?:约\\s*)?\\d{1,3}\\s*(?:分钟|min(?:ute)?s?)[）)]?", "")
@@ -116,12 +130,12 @@ public final class LessonDocumentSupport {
             List<String> extras = new ArrayList<>();
             for (int cellIndex = 0; cellIndex < row.size(); cellIndex++) {
                 if (cellIndex != indexes.section() && cellIndex != indexes.teacher() && cellIndex != indexes.student()
-                        && cellIndex != indexes.evaluation()) {
+                        && cellIndex != indexes.evaluation() && cellIndex != indexes.duration()) {
                     extras.add(row.get(cellIndex));
                 }
             }
             result.add(new TeachingProcessRow(rowIndex, title, minutes, teacher, student,
-                    evaluation, extras));
+                    evaluation, extras, rowIndex < rowIds.size() ? rowIds.get(rowIndex) : null));
         }
         if (result.isEmpty()) return null;
         return new TeachingProcess(List.copyOf(rows.get(headerIndex)), result);
@@ -166,15 +180,17 @@ public final class LessonDocumentSupport {
     }
 
     private static HeaderIndexes headerIndexes(List<String> row) {
-        int section = -1, teacher = -1, student = -1, evaluation = -1;
+        int section = -1, teacher = -1, student = -1, evaluation = -1, duration = -1;
         for (int index = 0; index < row.size(); index++) {
             String header = normalizeHeader(row.get(index));
             if (section < 0 && isSectionHeader(header)) section = index;
             if (teacher < 0 && isTeacherHeader(header)) teacher = index;
             if (student < 0 && isStudentHeader(header)) student = index;
             if (evaluation < 0 && isEvaluationHeader(header)) evaluation = index;
+            if (duration < 0 && (header.equals("时间") || header.equals("时长") || header.equals("duration")
+                    || header.equals("time") || header.equals("时间分钟") || header.equals("时长分钟"))) duration = index;
         }
-        return new HeaderIndexes(section, teacher, student, evaluation);
+        return new HeaderIndexes(section, teacher, student, evaluation, duration);
     }
 
     private static String normalizeHeader(String value) {
@@ -188,7 +204,7 @@ public final class LessonDocumentSupport {
     }
 
     private static boolean isSectionHeader(String header) {
-        return (header.contains("教学环节")
+        return (header.equals("环节") || header.equals("stage") || header.contains("教学环节")
                 || (header.contains("环节") && (header.contains("时间") || header.contains("时长"))))
                 && !header.contains("教师活动");
     }
@@ -235,11 +251,47 @@ public final class LessonDocumentSupport {
         return line.indexOf('|') >= 0 && parsePipeRow(line).size() >= 2;
     }
 
-    private static List<String> parsePipeRow(String line) {
+    static List<String> parsePipeRow(String line) {
         String value = line.strip();
-        if (value.startsWith("|")) value = value.substring(1);
-        if (value.endsWith("|")) value = value.substring(0, value.length() - 1);
-        return List.of(value.split("\\|", -1)).stream().map(String::strip).toList();
+        boolean wrapped = value.startsWith("|");
+        if (wrapped) value = value.substring(1);
+        List<String> cells = new ArrayList<>();
+        StringBuilder cell = new StringBuilder();
+        boolean escaped = false;
+        boolean endedWithDelimiter = false;
+        for (char c : value.toCharArray()) {
+            endedWithDelimiter = false;
+            if (escaped) {
+                if (c != '|' && c != '\\' && c != 'n') cell.append('\\');
+                cell.append(c == 'n' ? '\n' : c);
+                escaped = false;
+            } else if (c == '\\') escaped = true;
+            else if (c == '|') {
+                cells.add(cell.toString().strip()); cell.setLength(0); endedWithDelimiter = true;
+            } else cell.append(c);
+        }
+        if (escaped) cell.append('\\');
+        if (!endedWithDelimiter || !wrapped) cells.add(cell.toString().strip());
+        return List.copyOf(cells);
+    }
+
+    static boolean isSeparator(List<String> row) {
+        return !row.isEmpty() && row.stream().allMatch(c -> c.strip().matches(":?-{3,}:?"));
+    }
+
+    public static Map<String, Integer> columnBindings(List<List<String>> rows) {
+        for (var row : rows.stream().limit(3).toList()) {
+            var indexes = headerIndexes(row);
+            if (indexes.teacher() < 0 || indexes.student() < 0) continue;
+            Map<String, Integer> result = new LinkedHashMap<>();
+            if (indexes.section() >= 0) result.put("title", indexes.section());
+            result.put("teacherActivity", indexes.teacher());
+            result.put("studentActivity", indexes.student());
+            if (indexes.evaluation() >= 0) result.put("evaluation", indexes.evaluation());
+            if (indexes.duration() >= 0) result.put("durationMinutes", indexes.duration());
+            return result;
+        }
+        return Map.of();
     }
 
     private static String renderTable(List<List<String>> rows) {
@@ -247,7 +299,7 @@ public final class LessonDocumentSupport {
     }
 
     private static String id(int[] nextId) {
-        return "b" + nextId[0]++;
+        return "b-" + UUID.randomUUID();
     }
 
     private static void add(List<String> output, String value) {
@@ -255,6 +307,6 @@ public final class LessonDocumentSupport {
         if (!normalized.isBlank()) output.add(normalized);
     }
 
-    private record HeaderIndexes(int section, int teacher, int student, int evaluation) {
+    private record HeaderIndexes(int section, int teacher, int student, int evaluation, int duration) {
     }
 }

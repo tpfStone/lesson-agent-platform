@@ -21,9 +21,17 @@ for ($attempt = 1; $attempt -le [Math]::Max(1, $Retries); $attempt++) {
     $last = foreach ($service in $services) {
         try {
             $response = Invoke-WebRequest -Uri $service.Url -UseBasicParsing -TimeoutSec 5
+            $ready = $true
+            if ($service.Name -ne 'Frontend') {
+                $body = $response.Content | ConvertFrom-Json
+                if ($body.status -notin @('up', 'UP', 'ok')) { $ready = $false }
+                if ($body.PSObject.Properties.Name -contains 'model_configured' -and -not $body.model_configured) { $ready = $false }
+                if ($body.PSObject.Properties.Name -contains 'ready' -and -not $body.ready) { $ready = $false }
+                if ($body.PSObject.Properties.Name -contains 'llm_configured' -and $body.provider -ne 'mock' -and -not $body.llm_configured) { $ready = $false }
+            }
             [pscustomobject]@{
                 Service = $service.Name
-                Status  = 'UP'
+                Status  = $(if ($ready) { 'READY' } else { 'NOT_READY' })
                 HTTP    = [int]$response.StatusCode
                 URL     = $service.Url
             }
@@ -38,11 +46,11 @@ for ($attempt = 1; $attempt -le [Math]::Max(1, $Retries); $attempt++) {
             }
         }
     }
-    if (-not ($last | Where-Object Status -eq 'DOWN')) { break }
+    if (-not ($last | Where-Object Status -ne 'READY')) { break }
     if ($attempt -lt $Retries) { Start-Sleep -Seconds $DelaySeconds }
 }
 
 $last | Format-Table -AutoSize
-if ($last | Where-Object Status -eq 'DOWN') { exit 1 }
+if ($last | Where-Object Status -ne 'READY') { exit 1 }
 exit 0
 

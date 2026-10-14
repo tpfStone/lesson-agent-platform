@@ -29,6 +29,7 @@ interface ClassroomIssue {
 }
 interface ClassroomAction { actionId?: string; sourceIssueId?: string; action?: string }
 interface ClassroomRecord {
+  analysisStatus?: string; analysisWarnings?: string[];
   status?: string; modelMode?: string;
   session?: { status?: string; modelMode?: string; activeRoles?: string[] };
   events?: ClassroomEvent[];
@@ -89,10 +90,23 @@ const error = ref("");
 const artifactBase = (runId: string) => `/api/platform/lessons/${encodeURIComponent(lessonId.value)}/simulations/${encodeURIComponent(runId)}/artifacts`;
 const visibleRuns = computed(() => versionId.value ? runs.value.filter(run => run.versionId === versionId.value) : runs.value);
 const modeLabel = (mode?: string) => mode === "MOCK" ? "模拟回复" : mode === "REAL" ? "真实模型" : "历史记录";
-const statusLabel = (status?: string) => ({ COMPLETED: "已完成", FAILED: "运行失败", INTERRUPTED: "已中止", RUNNING: "进行中", PAUSED: "已暂停", QUEUED: "准备中" }[status || ""] || "状态未知");
+const statusLabel = (status?: string) => ({ COMPLETED: "已完成", FAILED: "运行失败", INTERRUPTED: "已中止", RUNNING: "进行中", PAUSED: "已暂停", QUEUED: "准备中", RECONCILING: "核对远端状态", UNKNOWN: "远端状态待确认" }[status || ""] || "状态未知");
 const roleLabel = (role?: string) => ({ teacher: "教师", assistant: "协作支持型", class_clown: "活跃互动型", deep_thinker: "深度思考型", note_taker: "认真记录型", inquisitive_mind: "好奇提问型", student: "学生" }[role || ""] || "课堂参与者");
 const events = computed(() => [...(detail.value?.sessionRecord?.events || [])].sort((a, b) => (a.sequence || 0) - (b.sequence || 0)));
 const issues = computed(() => detail.value?.sessionRecord?.issues || []);
+const analysisComplete = computed(() => detail.value?.sessionRecord?.analysisStatus === "COMPLETED");
+const analyzing = ref(false);
+async function retryAnalysis() {
+  if (!detail.value || analyzing.value) return;
+  const selected = detail.value.simulationRunId;
+  const selectedLessonId = lessonId.value;
+  analyzing.value = true;
+  try {
+    const next = (await axios.post<SimulationDetail>(`/api/platform/lessons/${encodeURIComponent(selectedLessonId)}/simulations/${encodeURIComponent(selected)}/analyze`, {}, {timeout:90000})).data;
+    if (lessonId.value === selectedLessonId && detail.value?.simulationRunId === selected) detail.value = next;
+  } catch (reason) { error.value = axios.isAxiosError(reason) ? reason.response?.data?.detail || reason.message : "补充分析失败"; }
+  finally { analyzing.value = false; }
+}
 const actions = computed(() => detail.value?.sessionRecord?.actionItems || []);
 const coverage = computed(() => detail.value?.sessionRecord?.statistics?.materialCoverage || []);
 const materialTitle = (id?: string) => coverage.value.find(item => item.materialId === id)?.title
@@ -296,7 +310,7 @@ async function poll(id: string) {
   try {
     const current = (await axios.get<Launch>(`/api/platform/simulation-launches/${encodeURIComponent(id)}`)).data;
     launch.value = current;
-    if (current.f3SessionId && current.state === "RUNNING") await refreshClassroom(id);
+    if (current.f3SessionId && ["RUNNING", "RECONCILING", "UNKNOWN"].includes(current.state)) await refreshClassroom(id);
     if (current.state === "COMPLETED" || current.state === "INTERRUPTED") {
       if (timer) window.clearInterval(timer); timer = undefined; starting.value = false;
       await loadRuns();
@@ -477,8 +491,8 @@ onBeforeUnmount(() => { if (timer) window.clearInterval(timer); });
           </aside>
         </div>
 
-        <BaseCard class="summary-card"><h3>课堂简报</h3><p>本次推演记录了 {{ events.length }} 个课堂事件，涉及 {{ detail.sessionRecord?.summary?.materialsCovered?.length ?? coverage.length ?? detail.materialCount }} 个教学环节；发现 {{ issues.length }} 项值得关注的问题。</p></BaseCard>
-        <BaseCard class="issues-card"><h3>发现的问题 <span>{{ issues.length }}</span></h3><p v-if="!issues.length" class="subtle">本次没有通过分析校验的课堂问题。</p>
+        <BaseCard class="summary-card"><h3>课堂简报</h3><p>本次推演记录了 {{ events.length }} 个课堂事件，涉及 {{ detail.sessionRecord?.summary?.materialsCovered?.length ?? coverage.length ?? detail.materialCount }} 个教学环节；{{ analysisComplete ? `分析发现 ${issues.length} 项值得关注的问题。` : "问题分析尚未完成。" }}</p></BaseCard>
+        <BaseCard class="issues-card"><h3>发现的问题 <span>{{ issues.length }}</span></h3><p v-if="!analysisComplete" class="subtle">课堂执行记录已保存，问题分析尚未完成或仍需重试。</p><button v-if="!analysisComplete" type="button" class="v2-button v2-button--secondary" :disabled="analyzing" @click="retryAnalysis">{{ analyzing ? "正在分析已有课堂……" : "重试问题分析" }}</button><p v-else-if="!issues.length" class="subtle">本次分析未发现有充分证据的问题。</p>
           <article v-for="(issue, index) in issues" :key="issue.nativeIssueId || index" class="issue-row"><h4>{{ issueDisplayTitle(issue) }}</h4><p>{{ issueDisplayProblem(issue) }}</p><p v-if="issue.targetLessonSection" class="subtle">对应环节：{{ issueSectionDisplayTitle(issue.targetLessonSection) }}</p><p v-if="issue.suggestedAction"><strong>改进建议：</strong>{{ issue.suggestedAction }}</p>
             <details v-if="issue.evidence?.length"><summary>查看课堂依据</summary><blockquote v-for="(evidence, evidenceIndex) in issue.evidence" :key="evidence.eventId || evidenceIndex">{{ roleLabel(evidence.speaker) }}：{{ evidence.contentQuote }}</blockquote></details>
           </article>

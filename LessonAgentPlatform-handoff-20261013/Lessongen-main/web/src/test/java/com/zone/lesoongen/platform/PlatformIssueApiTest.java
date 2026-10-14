@@ -33,6 +33,7 @@ class PlatformIssueApiTest {
     @Autowired PlatformLessonService lessons;
     @Autowired PlatformIssueIngestService issueIngest;
     @Autowired JdbcTemplate db;
+    @Autowired PlatformIssueService issueService;
 
     private MockMvc mvc;
     private String lessonId;
@@ -56,6 +57,24 @@ class PlatformIssueApiTest {
                                      'platform_issue_recommendation', 'platform_issue_context')
                 """, Integer.class);
         assertEquals(4, count);
+    }
+
+    @Test void manualResolutionUsesRevisionAndKeepsSourceDecision() {
+        String id = insertIssue("F4", "MEDIUM", "ACCEPTED", "已采纳建议但仍需验证");
+        db.update("UPDATE platform_issue SET source_decision = 'ACCEPTED' WHERE id = ?", id);
+        var saved = issueService.resolve(lessonId, versionId, id,
+                new PlatformIssueController.Resolution(0, "RESOLVED", "已核对修订内容"));
+        assertEquals("ACCEPTED", saved.issue().sourceDecision());
+        assertEquals("RESOLVED", saved.issue().resolutionStatus());
+        var next = lessons.addVersion(lessonId, new PlatformLessonController.NewVersion(versionId, "核对后的新版本"));
+        String target = next.lesson().currentVersionId();
+        assertEquals(1, issueService.revalidations(lessonId, target).size());
+        issueService.revalidate(lessonId, target, id, new PlatformIssueController.Resolution(0, "PERSISTS", "新版本仍缺少评价证据"));
+        assertEquals("RESOLVED", issueService.detail(lessonId, versionId, id).issue().resolutionStatus());
+        assertEquals("PERSISTS", issueService.revalidations(lessonId, target).get(0).get("status"));
+        org.junit.jupiter.api.Assertions.assertThrows(com.zone.lesoongen.application.AppException.class,
+                () -> issueService.resolve(lessonId, versionId, id,
+                    new PlatformIssueController.Resolution(0, "OPEN", "过期界面")));
     }
 
     @Test

@@ -35,6 +35,9 @@ public class PlatformSimulationLaunchService {
             int timeoutSeconds, String message, Instant createdAt) {}
     private final JdbcTemplate db;
     private final PlatformLessonService lessons;
+    private final PlatformLessonDocumentService documents;
+    private final PlatformSimulationService simulations;
+    @Value("${app.scheduling-enabled:true}") private boolean schedulingEnabled;
     private final PlatformNavigationBridgeService navigation;
     private final ObjectMapper mapper;
     private final String python, script, f2Url, f3Url, f4Url;
@@ -45,12 +48,15 @@ public class PlatformSimulationLaunchService {
 
     public PlatformSimulationLaunchService(JdbcTemplate db, PlatformLessonService lessons,
             PlatformNavigationBridgeService navigation, ObjectMapper mapper, AppProperties properties,
+            PlatformLessonDocumentService documents, PlatformSimulationService simulations,
             @Value("${platform.f3.python:${F3_PYTHON:python}}") String python,
             @Value("${platform.f3.runner-script:scripts/f3-runner/run_f3_demo.py}") String script,
             @Value("${platform.f3.base-url:http://127.0.0.1:8003}") String f3Url,
             @Value("${platform.f4.base-url:http://127.0.0.1:8000}") String f4Url,
             @Value("${platform.f2.self-url:http://127.0.0.1:8080}") String f2Url) {
         this.db = db; this.lessons = lessons; this.navigation = navigation; this.mapper = mapper;
+        this.documents = documents;
+        this.simulations = simulations;
         this.python = python; this.script = script; this.f3Url = f3Url; this.f4Url = f4Url; this.f2Url = f2Url;
         this.internalToken = properties.engineInternalToken();
         SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
@@ -81,6 +87,11 @@ public class PlatformSimulationLaunchService {
         var lesson = lessons.detail(request.lessonId());
         if (lesson.versions().stream().noneMatch(v -> v.id().equals(request.versionId())))
             throw AppException.notFound("教案版本");
+        if (db.queryForObject("SELECT COUNT(*) FROM platform_simulation_launch WHERE state IN ('QUEUED','RUNNING','RECONCILING','UNKNOWN')",
+                Integer.class) >= 4) throw new AppException(HttpStatus.TOO_MANY_REQUESTS, "F3_LAUNCH_CAPACITY", "课堂任务已达并发上限，请等待已有任务完成");
+        if (db.queryForObject("SELECT COUNT(*) FROM platform_simulation_launch WHERE lesson_id = ? AND version_id = ? AND state IN ('RECONCILING','UNKNOWN')",
+                Integer.class, request.lessonId(), request.versionId()) > 0) throw new AppException(HttpStatus.CONFLICT,
+                        "F3_RECONCILIATION_PENDING", "此版本的已有课堂正在核对远端状态，请从任务历史继续查看");
         UUID id = UUID.randomUUID();
         Launch queued = new Launch(id, request.requestKey(), request.lessonId(), request.versionId(), "QUEUED", null,
                 null, null, roles, timeout, "正在准备课堂模拟", Instant.now());
@@ -111,12 +122,57 @@ public class PlatformSimulationLaunchService {
 
     @EventListener(ApplicationReadyEvent.class)
     public void reconcileAfterRestart() {
+        if (!schedulingEnabled) return;
         db.update("""
                 UPDATE platform_simulation_launch
-                SET state = 'INTERRUPTED', message = ?, updated_at = ?
+                SET state = 'RECONCILING', message = ?, updated_at = ?
                 WHERE state IN ('QUEUED', 'RUNNING')
-                """, "平台服务曾重启，此任务已停止；可以重新发起课堂推演",
+                """, "平台已重启，正在核对远端课堂状态；尚未确认停止",
                 Timestamp.from(Instant.now()));
+    }
+
+    @org.springframework.scheduling.annotation.Scheduled(fixedDelay = 30000, initialDelay = 10000)
+    public void reconcileRemoteSessions() {
+        if (!schedulingEnabled) return;
+        for (String id : db.query("SELECT launch_id FROM platform_simulation_launch WHERE state IN ('RECONCILING','UNKNOWN') ORDER BY updated_at LIMIT 10",
+                (rs, row) -> rs.getString(1))) {
+            Launch launch = find(UUID.fromString(id));
+            try {
+                Map<?, ?> remote;
+                try { remote = f3.get().uri("/api/classroom/requests/{key}", launch.launchId().toString()).retrieve().body(Map.class); }
+                catch (RestClientResponseException missing) {
+                    if (missing.getStatusCode().value() != 404) throw missing;
+                    // The remote service fences late runner submissions before capacity is released.
+                    remote = request(() -> f3.post().uri("/api/classroom/requests/{key}/cancel-if-absent", launch.launchId().toString()).retrieve().body(Map.class));
+                }
+                if (remote != null && "NOT_CREATED".equals(remote.get("status"))) {
+                    update(launch, "FAILED", null, "远端已确认未创建课堂并取消此提交编号，可重新发起");
+                    continue;
+                }
+                if (remote == null) throw new IllegalStateException("Empty F3 lookup response");
+                if (!launch.lessonId().equals(remote.get("lessonId")) || !launch.versionId().equals(remote.get("versionId")))
+                    throw new IllegalStateException("F3 source binding mismatch");
+                String remoteId = UUID.fromString(String.valueOf(remote.get("sessionId"))).toString();
+                db.update("UPDATE platform_simulation_launch SET f3_session_id = ? WHERE launch_id = ?", remoteId, id);
+                String remoteState = String.valueOf(remote.get("status"));
+                if (!List.of("COMPLETED", "INTERRUPTED", "FAILED").contains(remoteState)) {
+                    update(launch, "RECONCILING", null, "已找到原课堂，远端仍在运行；可继续查看或结束课堂");
+                    continue;
+                }
+                var saved = db.query("SELECT id FROM platform_simulation_run WHERE f3_session_id = ?", (rs, row) -> rs.getString(1), remoteId);
+                String runId;
+                if (!saved.isEmpty()) runId = saved.get(0);
+                else {
+                    @SuppressWarnings("unchecked") Map<String,Object> result = (Map<String,Object>) request(() -> f3.get()
+                            .uri("/api/classroom/sessions/{id}/result", remoteId).retrieve().body(Map.class));
+                    runId = simulations.save(launch.lessonId(), new PlatformSimulationController.SaveSimulationRequest(result,
+                            "# 恢复归档\n\n课堂执行状态：" + remoteState + "\n\n完整课堂事件与分析状态见 JSON 记录。")).simulationRunId();
+                }
+                update(launch, remoteState, runId, "已核对远端终态并恢复结果归档");
+            } catch (RuntimeException error) {
+                update(launch, "UNKNOWN", launch.simulationRunId(), "尚未确认远端课堂状态，系统将继续核对；请勿重复启动同一版本");
+            }
+        }
     }
 
     private void insert(Launch launch) {
@@ -250,12 +306,37 @@ public class PlatformSimulationLaunchService {
                 .body(Map.of("timeoutSeconds", timeoutSeconds)).retrieve().body(Map.class));
     }
 
+    public PlatformSimulationController.SimulationDetail retryAnalysis(String lessonId, String runId) {
+        var stored = simulations.detail(lessonId, runId);
+        request(() -> f3.post().uri("/api/classroom/sessions/{id}/analyze", stored.f3SessionId()).retrieve().body(Map.class));
+        @SuppressWarnings("unchecked") Map<String,Object> result = (Map<String,Object>) request(() -> f3.get()
+                .uri("/api/classroom/sessions/{id}/result", stored.f3SessionId()).retrieve().body(Map.class));
+        if (!"COMPLETED".equals(result.get("analysisStatus"))) throw new AppException(HttpStatus.BAD_GATEWAY,
+                "F3_ANALYSIS_INCOMPLETE", "分析尚未成功，可稍后重试；已有课堂事件保持不变");
+        simulations.save(lessonId, new PlatformSimulationController.SaveSimulationRequest(result, "# 补充分析\n\n课堂执行记录保持不变；最新分析及证据见 JSON 记录。"));
+        return simulations.detail(lessonId, runId);
+    }
+
     private void run(Launch launch) {
         Path directory = null;
+        boolean runnerStarted = false;
         try {
             update(launch, "RUNNING", null, "正在建立教案会话并执行动态课堂模拟");
-            var started = navigation.start(launch.lessonId(), launch.versionId(), launch.launchId(), null, null, null);
-            bindF4Session(launch, started.sessionId());
+            List<Map<String, Object>> materials;
+            String fallbackReason = null;
+            try {
+                var snapshot = documents.get(launch.lessonId(), launch.versionId());
+                materials = LessonDocumentMaterialAdapter.materials(snapshot);
+                if (materials.isEmpty()) fallbackReason = snapshot.bindingStatus() + ": no verified teaching rows";
+            } catch (AppException missing) {
+                if (!"LESSON_DOCUMENT_NOT_FOUND".equals(missing.code())) throw missing;
+                materials = List.of(); fallbackReason = missing.code();
+            }
+            String f4SessionId = null;
+            if (materials.isEmpty()) {
+                var started = navigation.start(launch.lessonId(), launch.versionId(), launch.launchId(), null, null, null);
+                f4SessionId = started.sessionId(); bindF4Session(launch, f4SessionId);
+            }
             directory = Files.createTempDirectory("f3-launch-");
             Path config = directory.resolve("config.json");
             Path log = directory.resolve("runner.log");
@@ -268,7 +349,9 @@ public class PlatformSimulationLaunchService {
             input.put("internalToken", internalToken);
             input.put("lessonId", launch.lessonId());
             input.put("versionId", launch.versionId());
-            input.put("f4SessionId", started.sessionId());
+            input.put("f4SessionId", f4SessionId);
+            input.put("materials", materials);
+            input.put("fallbackReason", fallbackReason);
             input.put("requestKey", launch.launchId().toString());
             input.put("modelMode", "REAL");
             input.put("timeoutSeconds", launch.timeoutSeconds());
@@ -289,10 +372,12 @@ public class PlatformSimulationLaunchService {
             builder.environment().put("PYTHONUTF8", "1");
             builder.environment().put("PYTHONIOENCODING", "utf-8");
             Process process = builder.start();
+            runnerStarted = true;
             Instant deadline = Instant.now().plus(Duration.ofMinutes(30));
             while (!process.waitFor(1, TimeUnit.SECONDS)) {
                 observeSession(launch, live);
                 if (Instant.now().isAfter(deadline)) {
+                    try { control(launch.launchId(), "end"); } catch (RuntimeException ignored) { }
                     process.destroyForcibly(); throw new IOException("课堂模拟超过最长等待时间，请检查 F3 服务");
                 }
             }
@@ -308,7 +393,9 @@ public class PlatformSimulationLaunchService {
                 update(launch, "INTERRUPTED", runId, "课堂已提前结束，已保存现有记录");
             else update(launch, "COMPLETED", runId, "动态课堂模拟已完成，结果已保存到 F2");
         } catch (Exception error) {
-            update(launch, "FAILED", null, tail(error.getMessage() == null ? error.toString() : error.getMessage()));
+            update(launch, runnerStarted ? "RECONCILING" : "FAILED", null,
+                    tail(error.getMessage() == null ? error.toString() : error.getMessage())
+                    + (runnerStarted ? "；正在核对远端状态" : ""));
         } finally {
             if (directory != null) try {
                 // Successful artifacts are durable in F2; keep failed runner files for local diagnosis.

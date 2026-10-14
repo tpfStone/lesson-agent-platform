@@ -93,7 +93,7 @@ class PlatformLessonImportApiTest {
                 .andExpect(jsonPath("$.sizeBytes").value(docx.length))
                 .andExpect(jsonPath("$.extractedContent").value(org.hamcrest.Matchers.containsString("教学目标")))
                 .andExpect(jsonPath("$.extractedContent").value(org.hamcrest.Matchers.containsString("教师活动 | 学生活动")))
-                .andExpect(jsonPath("$.structuredContent.schemaVersion").value("1.0"))
+                .andExpect(jsonPath("$.structuredContent.schemaVersion").value("1.1"))
                 .andExpect(jsonPath("$.structuredContent.blocks[2].type").value("teaching_process"))
                 .andExpect(jsonPath("$.contentLength").isNumber());
 
@@ -254,15 +254,17 @@ class PlatformLessonImportApiTest {
         byte[] docx = docxWithTextAndTable();
         MockMultipartFile file = new MockMultipartFile("file", "rollback.docx", DOCX_MEDIA, docx);
         TransactionTemplate template = new TransactionTemplate(transactionManager);
+        String[] stagedKey = {null};
         String lessonId = template.execute(status -> {
             var created = imports.importDocx(file, new CreateLesson(
                     "回滚测试", "数学", "四年级", "回滚", 40, "确认后的正文"));
             String id = created.lesson().id();
-            assertTrue(storage.exists("lessons/" + id + "/source/original.docx"));
+            stagedKey[0] = db.queryForObject("SELECT storage_key FROM platform_lesson_source_document WHERE lesson_id = ?", String.class, id);
+            assertTrue(storage.exists(stagedKey[0]));
             status.setRollbackOnly();
             return id;
         });
-        assertFalse(storage.exists("lessons/" + lessonId + "/source/original.docx"));
+        assertFalse(storage.exists(stagedKey[0]));
         Integer rows = db.queryForObject("SELECT COUNT(*) FROM platform_lesson WHERE id = ?", Integer.class, lessonId);
         assertEquals(0, rows);
     }

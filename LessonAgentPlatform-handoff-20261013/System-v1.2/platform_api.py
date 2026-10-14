@@ -15,7 +15,10 @@ import logging
 import re
 import threading
 import uuid
+import base64
+import hashlib
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import asynccontextmanager
 from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
@@ -32,6 +35,7 @@ from service import run_annotation
 from standards import score_to_grade
 from comparison import generate_comparison
 from batch_reporting import build_comparison_payload, write_batch_quality_report
+from platform_task_store import TaskStore, atomic_json
 
 ROOT = Path(__file__).resolve().parent
 RUN_ROOT = ROOT / "platform_runs"
@@ -56,7 +60,12 @@ GROUPS = (
 )
 EXPECTED = {name for _, _, children in GROUPS for name in children}
 
-app = FastAPI(title="F1 Annotation Adapter", docs_url=None, redoc_url=None)
+@asynccontextmanager
+async def lifespan(_app):
+    recover_tasks()
+    yield
+
+app = FastAPI(title="F1 Annotation Adapter", docs_url=None, redoc_url=None, lifespan=lifespan)
 
 
 @app.exception_handler(RequestValidationError)
@@ -94,10 +103,15 @@ class AnnotationRequest(BaseModel):
     content: str = Field(min_length=1, max_length=100000)
     # v1 平台默认生成改进建议；保留该字段便于本地调试时临时关闭。
     suggest: bool = DEFAULT_SUGGEST
+    request_key: str | None = Field(default=None, max_length=255)
+    input_docx_base64: str | None = Field(default=None, max_length=28000000)
+    input_docx_sha256: str | None = None
+    input_kind: str = 'TEXT_PROJECTION'
 
 
 class BatchAnnotationRequest(BaseModel):
     items: list[AnnotationRequest] = Field(min_length=2, max_length=20)
+    request_key: str | None = Field(default=None, max_length=255)
 
 
 class ComparisonRequest(BaseModel):
@@ -245,11 +259,7 @@ def aggregate_student_rubric(result: dict) -> dict:
 def _initialize_run(request: AnnotationRequest) -> tuple[str, Path, dict]:
     if not request.content.strip():
         raise HTTPException(422, "教案正文不能为空")
-    run_id = uuid.uuid4().hex
-    run_dir = RUN_ROOT / run_id
-    run_dir.mkdir(parents=True, exist_ok=False)
     record = {
-        "runId": run_id,
         "lessonId": request.lesson_id,
         "versionId": request.version_id,
         "subject": request.subject,
@@ -261,8 +271,12 @@ def _initialize_run(request: AnnotationRequest) -> tuple[str, Path, dict]:
         "suggest": request.suggest,
         "createdAt": datetime.now(timezone.utc).isoformat(),
     }
-    _write_state(run_dir, record)
-    return run_id, run_dir, record
+    payload = request.model_dump(mode='json', exclude={'request_key'})
+    try:
+        record, created = TaskStore(RUN_ROOT).submit(request.request_key, payload, record)
+    except ValueError as error: raise HTTPException(409, str(error)) from error
+    except RuntimeError as error: raise HTTPException(429, str(error)) from error
+    return record['runId'], RUN_ROOT / record['runId'], {**record, '_new': created}
 
 
 def _execute(run_id: str, request: AnnotationRequest) -> None:
@@ -284,7 +298,16 @@ def _execute(run_id: str, request: AnnotationRequest) -> None:
             doc.add_paragraph(line)
         for line in request.content.splitlines():
             doc.add_paragraph(line)
-        doc.save(input_dir / filename)
+        if request.input_docx_base64:
+            raw = base64.b64decode(request.input_docx_base64, validate=True)
+            if hashlib.sha256(raw).hexdigest() != request.input_docx_sha256:
+                raise ValueError('INPUT_DOCX_SHA_MISMATCH')
+            # Parse before allowing the file into the evaluator.
+            import io
+            Document(io.BytesIO(raw))
+            (input_dir / filename).write_bytes(raw)
+        else:
+            doc.save(input_dir / filename)
 
         config = deepcopy(load_config(ROOT / "config.yaml"))
         config.setdefault("data", {})["plans_dir"] = str(input_dir)
@@ -333,6 +356,8 @@ def _execute(run_id: str, request: AnnotationRequest) -> None:
             "files": _artifact_entries(run_id, stored_artifacts),
             "artifacts": artifact_urls,
             "elapsedSeconds": outcome["elapsed"],
+            "inputKind": request.input_kind,
+            "artifactStatus": outcome.get('artifactStatus', {}),
         }
         (run_dir / "result.json").write_text(
             json.dumps(result_payload, ensure_ascii=False, indent=2),
@@ -386,8 +411,15 @@ def annotate(request: AnnotationRequest):
     if not request.content.strip():
         LOGGER.warning("F1 blank lesson content: chars=%d", len(request.content))
     run_id, _run_dir_path, record = _initialize_run(request)
-    EXECUTOR.submit(_execute, run_id, request)
+    if record.pop('_new', False): EXECUTOR.submit(_execute, run_id, request)
     return _public_state(run_id, record)
+
+
+def recover_tasks():
+    for run_id, payload in TaskStore(RUN_ROOT).recover():
+        EXECUTOR.submit(_execute, run_id, AnnotationRequest.model_validate(payload))
+    for batch_id, payload in TaskStore(BATCH_ROOT).recover():
+        EXECUTOR.submit(_execute_batch, batch_id, BatchAnnotationRequest.model_validate(payload))
 
 
 @app.get("/internal/v1/runs/{run_id}")
@@ -419,6 +451,39 @@ def artifact(run_id: str, kind: str):
     if not path.is_relative_to(run_dir.resolve()) or not path.is_file():
         raise HTTPException(404, "成果不存在")
     return FileResponse(path, filename=path.name)
+
+ARTIFACT_RETRY_LOCK = threading.Lock()
+
+@app.post('/internal/v1/runs/{run_id}/artifacts/{kind}/retry')
+def retry_artifact(run_id: str, kind: str):
+    # Serializing retries prevents one format from overwriting another format's state.
+    with ARTIFACT_RETRY_LOCK:
+        return _retry_artifact_locked(run_id, kind)
+
+def _retry_artifact_locked(run_id: str, kind: str):
+    import service
+    directory = _run_dir(run_id)
+    record = _read_state(directory)
+    if record.get('status') != 'COMPLETED': raise HTTPException(409, '评分尚未完成')
+    exports = {'docx': (service.generate_docx, '.docx'), 'json': (service.generate_json, '.json'),
+               'md': (service.generate_markdown, '.md'), 'docx_annotated': (service.generate_annotated_docx, '.docx')}
+    if kind not in exports: raise HTTPException(404, '此产物未请求或不支持重试')
+    payload = json.loads((directory / 'result.json').read_text(encoding='utf-8'))
+    target = directory / ('retry-' + kind + exports[kind][1])
+    exporter = exports[kind][0]
+    try:
+        if kind == 'docx_annotated': exporter(str(directory / 'input' / 'lesson.docx'), payload['rawResult'], str(target))
+        else: exporter(payload['rawResult'], str(target))
+        if not target.is_file(): raise RuntimeError('EXPORT_RETURNED_NO_FILE')
+        record.setdefault('artifacts', {})[kind] = target.name
+        payload.setdefault('artifactStatus', {})[kind] = {'status': 'READY'}
+        payload['files'] = _artifact_entries(run_id, record['artifacts'])
+        payload['artifacts'] = _artifact_urls(run_id, record['artifacts'])
+    except Exception as error:
+        payload.setdefault('artifactStatus', {})[kind] = {'status': 'FAILED', 'reason': type(error).__name__}
+    atomic_json(directory / 'result.json', payload)
+    _write_state(directory, record)
+    return payload
 
 # ============================================================
 # Batch annotation / comparison platform API
@@ -493,7 +558,8 @@ def _execute_batch(batch_id: str, request: BatchAnnotationRequest) -> None:
                 _write_state(batch_dir, record)
 
                 # 批量任务在同一工作线程内同步复用现有单份执行逻辑，避免产生第二套评分实现。
-                _execute(run_id, item)
+                if run_record['_new']:
+                    _execute(run_id, item)
                 final_run_state = _read_state(RUN_ROOT / run_id)
                 current["status"] = final_run_state.get("status")
                 if final_run_state.get("status") == "COMPLETED":
@@ -623,9 +689,11 @@ def batch_annotate(request: BatchAnnotationRequest):
     if blank_items:
         raise HTTPException(422, f"以下批量条目教案正文为空：{blank_items}")
 
-    batch_id = uuid.uuid4().hex
-    batch_dir = BATCH_ROOT / batch_id
-    batch_dir.mkdir(parents=True, exist_ok=False)
+    request_key = request.request_key or uuid.uuid4().hex
+    request = request.model_copy(update={'request_key': request_key, 'items': [
+        item.model_copy(update={'request_key': item.request_key or f'{request_key}:item:{index}'})
+        for index, item in enumerate(request.items)]})
+    batch_id = hashlib.sha256(request_key.encode()).hexdigest()[:32]
     record = {
         "batchId": batch_id,
         "status": "QUEUED",
@@ -636,8 +704,11 @@ def batch_annotate(request: BatchAnnotationRequest):
         "items": [],
         "createdAt": datetime.now(timezone.utc).isoformat(),
     }
-    _write_state(batch_dir, record)
-    EXECUTOR.submit(_execute_batch, batch_id, request)
+    try:
+        record, created = TaskStore(BATCH_ROOT).submit(request_key, request.model_dump(mode='json', exclude={'request_key'}), record)
+    except ValueError as error: raise HTTPException(409, str(error)) from error
+    except RuntimeError as error: raise HTTPException(429, str(error)) from error
+    if created: EXECUTOR.submit(_execute_batch, batch_id, request)
     return _batch_public_state(batch_id, record)
 
 

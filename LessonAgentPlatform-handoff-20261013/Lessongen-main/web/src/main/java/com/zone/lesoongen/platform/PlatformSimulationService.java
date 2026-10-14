@@ -105,6 +105,20 @@ public class PlatformSimulationService {
         Stored existing = findByF3Session(value.f3SessionId());
         if (existing != null) {
             if (!existing.resultSha256().equals(value.resultSha256())) {
+                Map<String, Object> original = parseJson(existing.resultJson());
+                if (isDynamicF3(original) && isDynamicF3(record) && sameExecution(original, record)
+                        && "COMPLETED".equals(record.get("analysisStatus"))) {
+                    db.queryForObject("SELECT id FROM platform_simulation_run WHERE id = ? FOR UPDATE", String.class, existing.id());
+                    int known = db.queryForObject("SELECT COUNT(*) FROM platform_simulation_analysis WHERE simulation_run_id = ? AND result_sha256 = ?",
+                            Integer.class, existing.id(), value.resultSha256());
+                    if (known == 0) {
+                        int revision = db.queryForObject("SELECT COALESCE(MAX(analysis_revision), 0) + 1 FROM platform_simulation_analysis WHERE simulation_run_id = ?", Integer.class, existing.id());
+                        db.update("INSERT INTO platform_simulation_analysis (simulation_run_id, analysis_revision, result_sha256, result_json, summary_markdown, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                                existing.id(), revision, value.resultSha256(), value.resultJson(), value.summaryMarkdown(), Timestamp.from(Instant.now()));
+                    }
+                    issueIngest.ingestF3(existing.lessonId(), existing.versionId(), existing.id(), existing.f3SessionId(), record);
+                    return saveResponse(existing, true);
+                }
                 throw new AppException(HttpStatus.CONFLICT, "SIMULATION_RESULT_CONFLICT",
                         "同一 F3 session 已保存不同内容，禁止覆盖原模拟结果");
             }
@@ -155,15 +169,27 @@ public class PlatformSimulationService {
                 stored.requestedRounds(), stored.completedRounds(), stored.materialCount(),
                 stored.finalClassroomStatus(), stored.historyCount(), stored.httpChain(), stored.f4Provider(),
                 stored.f3ModelContent(), stored.startedAt(), stored.finishedAt(), stored.createdAt(),
-                parseJson(stored.resultJson()), stored.summaryMarkdown());
+                parseJson(jsonArtifact(lessonId, simulationRunId)), markdownArtifact(lessonId, simulationRunId));
     }
 
     public String jsonArtifact(String lessonId, String simulationRunId) {
-        return find(lessonId, simulationRunId).resultJson();
+        var stored = find(lessonId, simulationRunId);
+        return db.query("SELECT result_json FROM platform_simulation_analysis WHERE simulation_run_id = ? ORDER BY analysis_revision DESC LIMIT 1",
+                (rs, row) -> rs.getString(1), simulationRunId).stream().findFirst().orElse(stored.resultJson());
     }
 
     public String markdownArtifact(String lessonId, String simulationRunId) {
-        return find(lessonId, simulationRunId).summaryMarkdown();
+        var stored = find(lessonId, simulationRunId);
+        return db.query("SELECT summary_markdown FROM platform_simulation_analysis WHERE simulation_run_id = ? ORDER BY analysis_revision DESC LIMIT 1",
+                (rs, row) -> rs.getString(1), simulationRunId).stream().findFirst().orElse(stored.summaryMarkdown());
+    }
+
+    private static boolean sameExecution(Map<String, Object> left, Map<String, Object> right) {
+        if (!java.util.Objects.equals(left.get("events"), right.get("events"))) return false;
+        Map<?, ?> a = (Map<?, ?>) left.get("session"), b = (Map<?, ?>) right.get("session");
+        for (String field : List.of("sessionId", "lessonId", "versionId", "materials", "modelMode", "status", "stopReason", "startedAt", "finishedAt"))
+            if (!java.util.Objects.equals(a.get(field), b.get(field))) return false;
+        return true;
     }
 
     private Validated validate(String lessonId, SaveSimulationRequest request) {
@@ -216,7 +242,7 @@ public class PlatformSimulationService {
             String stopReason = optionalText(session.get("stopReason"));
             finalClassroomStatus = stopReason == null
                     ? status
-                    : bounded(stopReason, 24, "session.stopReason");
+                    : bounded(stopReason, 64, "session.stopReason");
 
             historyCount = events.size();
 
@@ -356,7 +382,7 @@ public class PlatformSimulationService {
                 rs.getTimestamp("created_at").toInstant());
     }
 
-    private Map<?, ?> parseJson(String json) {
+    private Map<String, Object> parseJson(String json) {
         try {
             return mapper.readValue(json, Map.class);
         } catch (JacksonException error) {
@@ -431,7 +457,8 @@ public class PlatformSimulationService {
     }
 
     private static boolean isDynamicF3(Map<String, Object> record) {
-        if (!"2.0".equals(optionalText(record.get("schemaVersion")))) return false;
+        String schema = optionalText(record.get("schemaVersion"));
+        if (!"2.0".equals(schema) && !"2.1".equals(schema)) return false;
         return record.get("session") instanceof Map<?, ?> && record.get("events") instanceof List<?>;
     }
 

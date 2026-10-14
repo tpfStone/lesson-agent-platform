@@ -28,13 +28,13 @@ public class PlatformAnnotationController {
         this.annotations = annotations;
     }
 
-    public record Start(@NotBlank String versionId, boolean suggest) {}
+    public record Start(@NotBlank String versionId, boolean suggest, @jakarta.validation.constraints.Size(max=128) String requestKey) {}
 
     @PostMapping
     public ResponseEntity<AnnotationRun> start(@PathVariable String lessonId,
             @Valid @RequestBody Start input) {
         return ResponseEntity.status(HttpStatus.ACCEPTED)
-                .body(annotations.create(lessonId, input.versionId(), input.suggest()));
+                .body(annotations.create(lessonId, input.versionId(), input.suggest(), input.requestKey()));
     }
 
     @GetMapping
@@ -50,6 +50,11 @@ public class PlatformAnnotationController {
     @GetMapping("/{id}/result")
     public Map<?, ?> result(@PathVariable String lessonId, @PathVariable String id) {
         return annotations.result(lessonId, id);
+    }
+
+    @PostMapping("/{id}/artifacts/{kind}/retry")
+    public Map<?, ?> retryArtifact(@PathVariable String lessonId, @PathVariable String id, @PathVariable String kind) {
+        return annotations.retryArtifact(lessonId, id, kind);
     }
 
     @GetMapping("/{id}/artifacts/{kind}")

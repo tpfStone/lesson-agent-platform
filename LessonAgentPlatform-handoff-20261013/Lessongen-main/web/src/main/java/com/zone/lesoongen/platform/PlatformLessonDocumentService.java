@@ -31,6 +31,12 @@ public class PlatformLessonDocumentService {
     @Transactional
     public void save(String versionId, LessonDocument document, String parseStatus,
             String parserName, String parserVersion, List<String> warnings) {
+        validate(document);
+        String content = db.queryForObject("SELECT content FROM platform_lesson_version WHERE id = ? FOR UPDATE", String.class, versionId);
+        boolean verified = LessonDocumentProjection.project(document).content().equals(content)
+                || ("1.0".equals(document.schemaVersion()) && LessonDocumentSupport.renderText(document).equals(content));
+        if ("PARSED".equals(parseStatus) && !verified) throw new AppException(HttpStatus.UNPROCESSABLE_ENTITY,
+                "LESSON_DOCUMENT_CONTENT_MISMATCH", "结构与所保存正文不一致");
         String documentJson = json(document);
         String warningsJson = json(warnings == null ? List.of() : warnings);
         Instant now = Instant.now().truncatedTo(ChronoUnit.MICROS);
@@ -50,6 +56,53 @@ public class PlatformLessonDocumentService {
                     """, versionId, document.schemaVersion(), documentJson, parseStatus, parserName,
                     parserVersion, warningsJson, Timestamp.from(now), Timestamp.from(now));
         }
+        db.update("""
+                UPDATE platform_lesson_version_structure SET content_sha256 = ?, structure_sha256 = ?,
+                    projection_version = ?, binding_status = ? WHERE version_id = ?
+                """, sha256(content), structureSha256(document), LessonDocumentProjection.VERSION,
+                "PARSED".equals(parseStatus) && verified ? "VERIFIED" : "TEXT_FALLBACK", versionId);
+    }
+
+    /** Serialize missing insertion with normal writes using the immutable version row. */
+    @Transactional
+    public boolean insertIfAbsent(String versionId, String content) {
+        db.queryForObject("SELECT id FROM platform_lesson_version WHERE id = ? FOR UPDATE", String.class, versionId);
+        if (db.queryForObject("SELECT COUNT(*) FROM platform_lesson_version_structure WHERE version_id = ?",
+                Integer.class, versionId) > 0) return false;
+        save(versionId, LessonDocumentSupport.fromPlainText(content), "MISSING_FALLBACK", "PLAIN_TEXT", "1",
+                List.of("检测到结构缺失，已按该版本正文补录兼容结构；缺失原因未知，教学表格未确认恢复。"));
+        var current = db.queryForMap("SELECT structure_sha256 FROM platform_lesson_version_structure WHERE version_id = ?", versionId);
+        db.update("INSERT INTO platform_structure_repair_audit (id, version_id, old_structure, old_structure_sha256, new_structure_sha256, content_sha256, reason, created_at) VALUES (?, ?, NULL, NULL, ?, ?, ?, ?)",
+                com.zone.lesoongen.domain.shared.Ulids.next(java.time.Clock.systemUTC()), versionId, current.get("structure_sha256"), sha256(content),
+                "MISSING_FALLBACK: cause unknown; no semantic recovery claimed", Timestamp.from(Instant.now()));
+        return true;
+    }
+
+    public static void validate(LessonDocument document) {
+        var result = LessonDocumentValidator.validate(document);
+        if (!result.valid()) throw new AppException(HttpStatus.UNPROCESSABLE_ENTITY,
+                result.errors().contains("UNSUPPORTED_SCHEMA") ? "LESSON_DOCUMENT_UNSUPPORTED_SCHEMA" : "LESSON_DOCUMENT_INVALID",
+                "结构化教案不符合内容契约：" + String.join(",", result.errors()));
+    }
+
+    public static String sha256(String content) {
+        try { return java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256")
+                .digest(content.getBytes(java.nio.charset.StandardCharsets.UTF_8))); }
+        catch (java.security.NoSuchAlgorithmException e) { throw new IllegalStateException(e); }
+    }
+
+    public String structureSha256(LessonDocument document) {
+        return sha256(json(sorted(mapper.readValue(json(document), Object.class))));
+    }
+
+    private Object sorted(Object value) {
+        if (value instanceof java.util.Map<?, ?> map) {
+            var result = new java.util.TreeMap<String, Object>();
+            map.forEach((key, item) -> result.put(key.toString(), sorted(item)));
+            return result;
+        }
+        if (value instanceof List<?> list) return list.stream().map(this::sorted).toList();
+        return value;
     }
 
     public VersionDocument get(String lessonId, String versionId) {
@@ -69,9 +122,21 @@ public class PlatformLessonDocumentService {
                     "该历史版本尚未生成结构化教案；可继续使用原正文，或重新解析后补齐");
         }
         Row row = rows.get(0);
+        LessonDocument document = parseDocument(row.documentJson());
+        validate(document);
+        String content = db.queryForObject("SELECT content FROM platform_lesson_version WHERE id = ?", String.class, versionId);
+        String structureHash = structureSha256(document);
+        var stored = db.queryForMap("SELECT content_sha256, structure_sha256, binding_status FROM platform_lesson_version_structure WHERE version_id = ?", versionId);
+        if ((stored.get("content_sha256") != null && !sha256(content).equals(stored.get("content_sha256")))
+                || (stored.get("structure_sha256") != null && !structureHash.equals(stored.get("structure_sha256")))) throw corrupt();
+        boolean matches = LessonDocumentProjection.project(document).content().equals(content)
+                || ("1.0".equals(document.schemaVersion()) && LessonDocumentSupport.renderText(document).equals(content));
+        String binding = "PARSED".equals(row.parseStatus()) ? (matches ? "VERIFIED" : "UNVERIFIED") : "TEXT_FALLBACK";
         return new VersionDocument(lessonId, row.versionId(), row.schemaVersion(),
-                parseDocument(row.documentJson()), row.parseStatus(), row.parserName(),
-                row.parserVersion(), parseWarnings(row.warningsJson()), row.createdAt(), row.updatedAt());
+                document, row.parseStatus(), row.parserName(),
+                row.parserVersion(), parseWarnings(row.warningsJson()), row.createdAt(), row.updatedAt(),
+                sha256(content), structureHash, "1.0".equals(document.schemaVersion()) ? "legacy-1.0" : LessonDocumentProjection.VERSION,
+                binding, "VERIFIED".equals(binding) && document.blocks().stream().anyMatch(b -> b.teachingProcess() != null));
     }
 
     private Row mapRow(ResultSet rs) throws SQLException {
@@ -95,9 +160,6 @@ public class PlatformLessonDocumentService {
         try {
             return mapper.readValue(value, LessonDocument.class);
         } catch (JacksonException error) {
-            System.err.println("=== PARSE DOCUMENT FAILED ===");
-            System.err.println(value);
-            error.printStackTrace();
             throw corrupt();
         }
     }
@@ -107,9 +169,6 @@ public class PlatformLessonDocumentService {
         try {
             return (List<String>) (List<?>) mapper.readValue(value, List.class);
         } catch (JacksonException error) {
-            System.err.println("=== PARSE WARNINGS FAILED ===");
-            System.err.println(value);
-            error.printStackTrace();
             throw corrupt();
         }
     }
@@ -121,7 +180,9 @@ public class PlatformLessonDocumentService {
 
     public record VersionDocument(String lessonId, String versionId, String schemaVersion,
             LessonDocument document, String parseStatus, String parserName, String parserVersion,
-            List<String> warnings, Instant createdAt, Instant updatedAt) {
+            List<String> warnings, Instant createdAt, Instant updatedAt,
+            String contentSha256, String structureSha256, String projectionVersion,
+            String bindingStatus, boolean usableForSimulation) {
     }
 
     private record Row(String versionId, String schemaVersion, String documentJson,

@@ -63,6 +63,10 @@ class LessonPlan(Owned, Record, Base):
     session_id: Mapped[str] = mapped_column(ForeignKey('sessions.id'), unique=True)
     original_content: Mapped[str] = mapped_column(Text)
     current_content: Mapped[str] = mapped_column(Text)
+    structured_content: Mapped[dict | None] = mapped_column(json_type)
+    source_binding: Mapped[dict | None] = mapped_column(json_type)
+    structure_warnings: Mapped[list | None] = mapped_column(json_type)
+    fallback_projection: Mapped[dict | None] = mapped_column(json_type)
 
 
 class LessonPlanVersion(Owned, Record, Base):
@@ -94,6 +98,7 @@ class Section(Owned, Record, Base):
     section_type: Mapped[str | None] = mapped_column(String(60))
     parent_section_id: Mapped[str | None] = mapped_column(ForeignKey('sections.id'))
     current_content: Mapped[str] = mapped_column(Text)
+    source_ref: Mapped[dict | None] = mapped_column(json_type)
 
 
 class SectionVersion(Owned, Record, Base):
@@ -114,6 +119,8 @@ class SectionReview(Owned, Record, Base):
     section_id: Mapped[str] = mapped_column(ForeignKey('sections.id'))
     generated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    generation_claim: Mapped[str | None] = mapped_column(String(36))
+    claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class GenerationRecord(Owned, Record, Base):

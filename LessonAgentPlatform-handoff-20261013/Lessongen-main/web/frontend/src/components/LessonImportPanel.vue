@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { ref, onUnmounted } from "vue";
 import { useRouter } from "vue-router";
 import axios from "axios";
+import LessonDocumentPreview from "./LessonDocumentPreview.vue";
+import type { LessonDocument } from "../types/lesson-document";
 
-interface DocxPreview { originalFilename: string; sizeBytes: number; extractedContent: string; contentLength: number; warnings: string[] }
+interface DocxPreview { originalFilename: string; sizeBytes: number; extractedContent: string; contentLength: number; structuredContent: LessonDocument; warnings: string[] }
 interface CreatedLesson { lesson: { id: string; title?: string; currentVersionId: string } }
 const props = withDefaults(defineProps<{ redirectOnSave?: boolean }>(), { redirectOnSave: true });
 const emit = defineEmits<{ imported: [created: CreatedLesson] }>();
@@ -13,7 +15,10 @@ const file = ref<File | null>(null), preview = ref<DocxPreview | null>(null);
 const previewing = ref(false), saving = ref(false), error = ref("");
 const form = ref({ title: "", subject: "", grade: "", topic: "", durationMinutes: 45, content: "" });
 function chooseFile() { fileInput.value?.click(); }
+let generation = 0;
+onUnmounted(() => { generation++; });
 async function selected(event: Event) {
+  const request = ++generation;
   const input = event.target as HTMLInputElement;
   const selectedFile = input.files?.[0] || null;
   file.value = null; preview.value = null; error.value = "";
@@ -22,13 +27,16 @@ async function selected(event: Event) {
   previewing.value = true;
   try {
     const data = new FormData(); data.append("file", selectedFile, selectedFile.name);
-    preview.value = (await axios.post<DocxPreview>("/api/platform/lessons/imports/docx/preview", data, { timeout: 60000 })).data;
+    const next = (await axios.post<DocxPreview>("/api/platform/lessons/imports/docx/preview", data, { timeout: 60000 })).data;
+    if (request !== generation) return;
+    preview.value = next;
     file.value = selectedFile; form.value.content = preview.value.extractedContent;
     const name = preview.value.originalFilename.replace(/\.docx$/i, "").trim();
     form.value.title = name; form.value.topic = name;
   } catch (reason) {
+    if (request !== generation) return;
     error.value = axios.isAxiosError(reason) ? (reason.response?.data as { detail?: string })?.detail || reason.message : "DOCX解析失败";
-  } finally { previewing.value = false; }
+  } finally { if (request === generation) previewing.value = false; }
 }
 async function save() {
   if (!file.value || !preview.value || saving.value || !form.value.title.trim()) return;
@@ -63,6 +71,7 @@ async function save() {
       <label>学科<input v-model="form.subject" placeholder="例如：数学"></label>
       <label>年级<input v-model="form.grade" placeholder="例如：四年级"></label>
       <label class="wide">课题<input v-model="form.topic" maxlength="200"></label>
+      <details class="wide import-preview"><summary>核对教案内容</summary><LessonDocumentPreview :document="preview.structuredContent" :warnings="preview.warnings" /></details>
       <div class="import-actions"><button type="button" class="change-file" @click="chooseFile">重新选择</button><button type="button" class="save-file" :disabled="saving || !form.title.trim()" @click="save">{{ saving ? "正在保存……" : "保存到我的教案" }}</button></div>
     </div>
     <p v-if="error" class="import-error" role="alert">{{ error }}</p>

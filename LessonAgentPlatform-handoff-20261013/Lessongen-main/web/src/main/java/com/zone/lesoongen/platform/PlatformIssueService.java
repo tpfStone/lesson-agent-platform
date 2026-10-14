@@ -31,6 +31,7 @@ public class PlatformIssueService {
                    i.source_module, i.source_run_id, i.source_issue_id,
                    i.category, i.title, i.description, i.severity, i.status,
                    i.confidence, i.section_ref, i.created_at, i.updated_at,
+                   i.source_decision, i.resolution_status, i.revision, i.resolution_reason,
                    (SELECT COUNT(*) FROM platform_issue_evidence e WHERE e.issue_id = i.id) evidence_count,
                    (SELECT COUNT(*) FROM platform_issue_recommendation r WHERE r.issue_id = i.id) recommendation_count
             FROM platform_issue i
@@ -78,6 +79,18 @@ public class PlatformIssueService {
         return new IssuePage(items, page, size, totalElements, totalPages);
     }
 
+    @org.springframework.transaction.annotation.Transactional
+    public IssueDetail resolve(String lessonId, String versionId, String issueId, PlatformIssueController.Resolution input) {
+        detail(lessonId, versionId, issueId);
+        if (!Set.of("OPEN", "RESOLVED", "DISMISSED").contains(input.resolutionStatus()))
+            throw bad("ISSUE_RESOLUTION_INVALID", "问题处理状态无效");
+        int updated = db.update("UPDATE platform_issue SET resolution_status = ?, resolution_reason = ?, status = ?, revision = revision + 1, updated_at = ? WHERE id = ? AND lesson_id = ? AND version_id = ? AND revision = ?",
+                input.resolutionStatus(), input.reason(), input.resolutionStatus(), java.sql.Timestamp.from(java.time.Instant.now()),
+                issueId, lessonId, versionId, input.expectedRevision());
+        if (updated != 1) throw new AppException(HttpStatus.CONFLICT, "ISSUE_REVISION_CONFLICT", "问题已被其他操作修改，请刷新后重试");
+        return detail(lessonId, versionId, issueId);
+    }
+
     public IssueDetail detail(String lessonId, String versionId, String issueId) {
         requireVersion(lessonId, versionId);
         IssueSummary issue = db.query(SUMMARY_SELECT
@@ -107,6 +120,20 @@ public class PlatformIssueService {
                 ORDER BY created_at ASC, id ASC
                 """, (rs, row) -> context(rs), issueId);
         return new IssueDetail(issue, evidence, recommendations, context);
+    }
+
+    public List<java.util.Map<String,Object>> revalidations(String lessonId, String versionId) {
+        requireVersion(lessonId, versionId);
+        return db.queryForList("SELECT r.issue_id, i.version_id source_version_id, i.title, i.section_ref, r.status, r.evidence, r.revision FROM platform_issue_revalidation r JOIN platform_issue i ON i.id = r.issue_id WHERE i.lesson_id = ? AND r.target_version_id = ? ORDER BY i.created_at", lessonId, versionId);
+    }
+
+    @org.springframework.transaction.annotation.Transactional
+    public void revalidate(String lessonId, String versionId, String issueId, PlatformIssueController.Resolution input) {
+        requireVersion(lessonId, versionId);
+        if (!Set.of("PENDING", "PERSISTS", "RESOLVED", "NOT_APPLICABLE").contains(input.resolutionStatus())) throw bad("ISSUE_REVALIDATION_INVALID", "复核状态无效");
+        int count = db.update("UPDATE platform_issue_revalidation SET status = ?, evidence = ?, revision = revision + 1 WHERE issue_id = ? AND target_version_id = ? AND revision = ? AND issue_id IN (SELECT id FROM platform_issue WHERE lesson_id = ?)",
+                input.resolutionStatus(), input.reason(), issueId, versionId, input.expectedRevision(), lessonId);
+        if (count != 1) throw new AppException(HttpStatus.CONFLICT, "ISSUE_REVISION_CONFLICT", "复核关系已改变或不存在，请刷新后重试");
     }
 
     private void requireVersion(String lessonId, String versionId) {
@@ -141,7 +168,8 @@ public class PlatformIssueService {
                 rs.getString("severity"), rs.getString("status"), rs.getBigDecimal("confidence"),
                 rs.getString("section_ref"), rs.getInt("evidence_count"),
                 rs.getInt("recommendation_count"), rs.getTimestamp("created_at").toInstant(),
-                rs.getTimestamp("updated_at").toInstant());
+                rs.getTimestamp("updated_at").toInstant(), rs.getString("source_decision"),
+                rs.getString("resolution_status"), rs.getLong("revision"), rs.getString("resolution_reason"));
     }
 
     private static IssueEvidence evidence(ResultSet rs) throws SQLException {

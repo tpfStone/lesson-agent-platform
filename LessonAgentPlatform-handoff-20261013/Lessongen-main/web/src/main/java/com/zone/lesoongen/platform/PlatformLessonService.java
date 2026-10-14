@@ -29,11 +29,13 @@ import com.zone.lesoongen.platform.PlatformLessonController.NewVersion;
 @Service
 public class PlatformLessonService {
     private final JdbcTemplate db;
+    private final LessonVersionWriteService writer;
     private final PlatformLessonDocumentService documents;
     private final CurrentUserService currentUser;
 
     public PlatformLessonService(JdbcTemplate db, PlatformLessonDocumentService documents,
-            CurrentUserService currentUser) {
+            CurrentUserService currentUser, LessonVersionWriteService writer) {
+        this.writer = writer;
         this.db = db;
         this.documents = documents;
         this.currentUser = currentUser;
@@ -62,21 +64,14 @@ public class PlatformLessonService {
 
     private LessonDetail createInitialVersion(CreateLesson request, String sourceModule,
             LessonDocument document, String parseStatus, String parserName, List<String> warnings) {
-        Instant now = Instant.now().truncatedTo(ChronoUnit.MICROS);
-        String lessonId = Ulids.next(java.time.Clock.systemUTC());
-        String versionId = Ulids.next(java.time.Clock.systemUTC());
-        db.update("""
-                INSERT INTO platform_lesson
-                (id, owner_user_id, title, subject, grade, topic, duration_minutes,
-                 current_version_id, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)
-                """, lessonId, currentUser.require().id(), request.title().trim(),
-                request.subject().trim(), request.grade().trim(), request.topic().trim(),
-                request.durationMinutes(), Timestamp.from(now), Timestamp.from(now));
-        insertVersion(versionId, lessonId, null, 0, request.content(), sourceModule, now);
-        documents.save(versionId, document, parseStatus, parserName, "1", warnings);
-        db.update("UPDATE platform_lesson SET current_version_id = ? WHERE id = ?", versionId, lessonId);
-        return detail(lessonId);
+        var written = writer.createInitial(request, sourceModule, null, document, parseStatus, parserName, warnings);
+        return detail(written.lessonId());
+    }
+
+    @Transactional
+    public LessonDetail createGenerated(CreateLesson request, LessonDocument document, String nativeReference) {
+        var written = writer.createInitial(request, "F2_GENERATE", nativeReference, document, "PARSED", "F2_RESULT", List.of());
+        return detail(written.lessonId());
     }
 
     public List<LessonSummary> listForOwner(String ownerUserId) {
@@ -111,53 +106,17 @@ public class PlatformLessonService {
     @Transactional
     public LessonDetail addVersionFromModule(String lessonId, String expectedVersionId,
             String content, String sourceModule, String nativeReference) {
-        LessonDetail before = detail(lessonId);
-        String current = before.lesson().currentVersionId();
-        if (!Objects.equals(current, expectedVersionId)) {
-            throw new AppException(HttpStatus.CONFLICT, "LESSON_VERSION_CONFLICT",
-                    "教案已被修改，请刷新后重新确认当前版本");
-        }
-        int next = before.versions().stream().mapToInt(LessonVersion::versionNumber).max().orElse(-1) + 1;
-        String versionId = Ulids.next(java.time.Clock.systemUTC());
-        Instant now = Instant.now().truncatedTo(ChronoUnit.MICROS);
-        insertVersion(versionId, lessonId, current, next, content, sourceModule, nativeReference, now);
-        documents.save(versionId, LessonDocumentSupport.fromPlainText(content), "FALLBACK",
-                "PLAIN_TEXT", "1", List.of("该版本由纯正文生成兼容结构；复杂表格可能需要重新解析。"));
-        int changed = db.update("""
-                UPDATE platform_lesson SET current_version_id = ?, updated_at = ?
-                WHERE id = ? AND current_version_id = ?
-                """, versionId, Timestamp.from(now), lessonId, current);
-        if (changed != 1) {
-            throw new AppException(HttpStatus.CONFLICT, "LESSON_VERSION_CONFLICT",
-                    "教案已被修改，请刷新后重新确认当前版本");
-        }
+        return addStructuredVersion(lessonId, expectedVersionId, content, sourceModule, nativeReference,
+                null, "FALLBACK", "PLAIN_TEXT", List.of("正文编辑已生成兼容结构；未确认恢复表格语义。"));
+    }
+
+    @Transactional
+    public LessonDetail addStructuredVersion(String lessonId, String expectedVersionId, String content,
+            String sourceModule, String nativeReference, LessonDocument document, String parseStatus,
+            String parserName, List<String> warnings) {
+        writer.append(new VersionWriteCommand(lessonId, expectedVersionId, content, document, parseStatus,
+                parserName, warnings, sourceModule, nativeReference, null, null));
         return detail(lessonId);
-    }
-
-    private void insertVersion(String versionId, String lessonId, String parentId,
-            int number, String content, String source, Instant now) {
-        insertVersion(versionId, lessonId, parentId, number, content, source, null, now);
-    }
-
-    private void insertVersion(String versionId, String lessonId, String parentId,
-            int number, String content, String source, String nativeReference, Instant now) {
-        db.update("""
-                INSERT INTO platform_lesson_version
-                (id, lesson_id, parent_version_id, version_number, content,
-                 content_sha256, source_module, native_reference, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, versionId, lessonId, parentId, number, content, sha256(content),
-                source, nativeReference, Timestamp.from(now));
-    }
-
-    private static String sha256(String content) {
-        try {
-            byte[] hash = MessageDigest.getInstance("SHA-256")
-                    .digest(content.getBytes(StandardCharsets.UTF_8));
-            return HexFormat.of().formatHex(hash);
-        } catch (NoSuchAlgorithmException error) {
-            throw new IllegalStateException("SHA-256 unavailable", error);
-        }
     }
 
     private static LessonSummary summary(ResultSet rs) throws SQLException {

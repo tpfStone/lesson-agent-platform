@@ -423,6 +423,7 @@ def run_annotation(
     # 逐个生成，单个产物失败不阻断整体流程（保证评分结果可用）
     os.makedirs(plan_out, exist_ok=True)
     files = {}
+    artifact_status = {kind: {'status': 'NOT_REQUESTED'} for kind in ('docx', 'json', 'md', 'pdf', 'docx_annotated')}
 
     artifacts = [
         ("docx", f"{base_name}_批注报告.docx", lambda p: generate_docx(result, p)),
@@ -442,7 +443,11 @@ def run_annotation(
             out = gen(os.path.join(plan_out, fname))
             if out:
                 files[key] = out
+                artifact_status[key] = {'status': 'READY'}
+            else:
+                artifact_status[key] = {'status': 'FAILED', 'reason': 'EXPORT_RETURNED_NO_FILE'}
         except Exception as e:
+            artifact_status[key] = {'status': 'FAILED', 'reason': type(e).__name__}
             log(f"⚠ 产物生成失败（{key}）：{e}")
 
     log(f"产物已生成到 {plan_out}")
@@ -455,6 +460,7 @@ def run_annotation(
         "plan_name": plan_filename,
         "elapsed": time.time() - t_start,
         "files": {k: v for k, v in files.items() if v},
+        "artifactStatus": artifact_status,
     }
 
 

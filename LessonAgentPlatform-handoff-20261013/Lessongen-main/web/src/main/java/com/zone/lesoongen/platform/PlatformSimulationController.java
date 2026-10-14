@@ -25,9 +25,11 @@ import jakarta.validation.constraints.Size;
 @RequestMapping("/api/platform/lessons/{lessonId}/simulations")
 public class PlatformSimulationController {
     private final PlatformSimulationService simulations;
+    private final PlatformSimulationLaunchService launches;
 
-    public PlatformSimulationController(PlatformSimulationService simulations) {
+    public PlatformSimulationController(PlatformSimulationService simulations, PlatformSimulationLaunchService launches) {
         this.simulations = simulations;
+        this.launches = launches;
     }
 
     public record SaveSimulationRequest(
@@ -100,6 +102,11 @@ public class PlatformSimulationController {
     public SimulationDetail detail(@PathVariable String lessonId,
             @PathVariable String simulationRunId) {
         return simulations.detail(lessonId, simulationRunId);
+    }
+
+    @PostMapping("/{simulationRunId}/analyze")
+    public SimulationDetail retryAnalysis(@PathVariable String lessonId, @PathVariable String simulationRunId) {
+        return launches.retryAnalysis(lessonId, simulationRunId);
     }
 
     @GetMapping("/{simulationRunId}/artifacts/json")

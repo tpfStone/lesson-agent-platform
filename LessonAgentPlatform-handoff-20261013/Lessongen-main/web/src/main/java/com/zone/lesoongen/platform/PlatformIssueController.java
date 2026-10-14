@@ -19,6 +19,27 @@ public class PlatformIssueController {
         this.issues = issues;
     }
 
+    public record Resolution(long expectedRevision, @jakarta.validation.constraints.NotBlank String resolutionStatus,
+            @jakarta.validation.constraints.NotBlank @jakarta.validation.constraints.Size(max=2000) String reason) {}
+
+    @GetMapping("/revalidations")
+    public List<java.util.Map<String,Object>> revalidations(@PathVariable String lessonId, @PathVariable String versionId) {
+        return issues.revalidations(lessonId, versionId);
+    }
+
+    @org.springframework.web.bind.annotation.PatchMapping("/revalidations/{issueId}")
+    public List<java.util.Map<String,Object>> revalidate(@PathVariable String lessonId, @PathVariable String versionId,
+            @PathVariable String issueId, @jakarta.validation.Valid @org.springframework.web.bind.annotation.RequestBody Resolution input) {
+        issues.revalidate(lessonId, versionId, issueId, input);
+        return issues.revalidations(lessonId, versionId);
+    }
+
+    @org.springframework.web.bind.annotation.PatchMapping("/{issueId}")
+    public IssueDetail resolve(@PathVariable String lessonId, @PathVariable String versionId,
+            @PathVariable String issueId, @jakarta.validation.Valid @org.springframework.web.bind.annotation.RequestBody Resolution input) {
+        return issues.resolve(lessonId, versionId, issueId, input);
+    }
+
     public record IssueSummary(
             String issueId,
             String lessonId,
@@ -37,7 +58,7 @@ public class PlatformIssueController {
             int evidenceCount,
             int recommendationCount,
             Instant createdAt,
-            Instant updatedAt) {}
+            Instant updatedAt, String sourceDecision, String resolutionStatus, long revision, String resolutionReason) {}
 
     public record IssuePage(
             List<IssueSummary> items,

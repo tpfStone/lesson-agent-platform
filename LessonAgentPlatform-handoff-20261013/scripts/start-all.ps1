@@ -4,6 +4,8 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'process-identity.ps1')
+$LaunchId = [guid]::NewGuid().ToString()
 $Root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $EnvFile = Join-Path $Root '.env'
 $Runtime = Join-Path $Root '.runtime'
@@ -113,8 +115,8 @@ function Start-LoggedProcess {
         -WorkingDirectory $WorkingDirectory `
         -RedirectStandardOutput $out `
         -RedirectStandardError $err `
-        -PassThru
-    $pids[$Name] = $process.Id
+        -WindowStyle Hidden -PassThru
+    $pids[$Name] = Get-ServiceIdentity $process $LaunchId
     Save-Pids
     Write-Host ("Started {0,-10} PID={1}" -f $Name, $process.Id)
 }
@@ -128,6 +130,7 @@ try {
     Pop-Location
 }
 
+try {
 Start-LoggedProcess 'f1' $F1Python @('-m', 'uvicorn', 'platform_api:app', '--host', '127.0.0.1', '--port', '8002', '--http', 'h11') $F1Dir
 Start-LoggedProcess 'f2-engine' $EnginePython @('-m', 'paper4_pipeline.web_api') $EngineDir
 Start-LoggedProcess 'f3' $F3Python @('-m', 'uvicorn', 'app.api.classroom_api:app', '--host', '127.0.0.1', '--port', '8003') $F3Dir
@@ -153,9 +156,15 @@ if ($SkipFrontend) { $healthArgs += '-SkipFrontend' }
 & powershell.exe @healthArgs
 if ($LASTEXITCODE -ne 0) {
     Write-Warning "One or more services are not healthy. Inspect $Logs"
-    exit 1
+    throw 'Service readiness check failed.'
 }
 
 Write-Host 'All requested services are healthy.'
 if (-not $SkipFrontend) { Write-Host 'Open http://127.0.0.1:5177' }
+} catch {
+    if ($pids.Count -gt 0) {
+        & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'stop-all.ps1')
+    }
+    throw
+}
 

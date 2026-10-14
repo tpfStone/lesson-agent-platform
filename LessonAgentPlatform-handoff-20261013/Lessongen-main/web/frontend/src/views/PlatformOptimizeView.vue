@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, ref, watch, onUnmounted } from "vue";
 import { RouterLink, useRoute, useRouter } from "vue-router";
 import axios from "axios";
 import AppPageHeader from "../components/AppPageHeader.vue";
@@ -166,7 +166,11 @@ function friendlyError(reason: unknown, fallback: string) {
   return detailText || fallback;
 }
 
+let detailGeneration = 0;
+onUnmounted(() => { detailGeneration++; });
 async function loadDetail(id: string, versionId: string) {
+  const generation = ++detailGeneration;
+  detail.value = null; previous.value = [];
   if (!id || !versionId) {
     detail.value = null;
     previous.value = [];
@@ -176,6 +180,7 @@ async function loadDetail(id: string, versionId: string) {
   error.value = "";
   try {
     const next = (await axios.get<LessonDetail>(`/api/platform/lessons/${encodeURIComponent(id)}`)).data;
+    if (generation !== detailGeneration) return;
     detail.value = next;
     const version = next.versions.find(item => item.id === versionId);
     if (!version) {
@@ -208,14 +213,17 @@ async function loadDetail(id: string, versionId: string) {
     hydrating.value = false;
 
     try {
-      previous.value = (await axios.get<OptimizeHistory[]>("/api/platform/optimizations")).data
+      const history = (await axios.get<OptimizeHistory[]>("/api/platform/optimizations")).data
         .filter(item => item.lessonId === id && item.sourceVersionId === versionId);
+      if (generation === detailGeneration) previous.value = history;
     } catch {
-      previous.value = [];
+      if (generation === detailGeneration) previous.value = [];
     }
   } catch (reason) {
+    if (generation !== detailGeneration) return;
     error.value = friendlyError(reason, "暂时无法读取教案，请稍后重试。");
   } finally {
+    if (generation !== detailGeneration) return;
     hydrating.value = false;
     loading.value = false;
   }

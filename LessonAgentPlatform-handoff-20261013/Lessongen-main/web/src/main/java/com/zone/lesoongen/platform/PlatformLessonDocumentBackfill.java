@@ -11,8 +11,9 @@ import org.springframework.core.annotation.Order;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
-/** Creates a safe plain-text structure for versions that existed before migration V14. */
+/** Missing structures are compatibility repairs, never evidence of successful semantic recovery. */
 @Component
+@org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(name = "platform.structure-backfill.enabled", havingValue = "true")
 @Order(Ordered.LOWEST_PRECEDENCE)
 public class PlatformLessonDocumentBackfill implements ApplicationRunner {
     private static final Logger log = LoggerFactory.getLogger(PlatformLessonDocumentBackfill.class);
@@ -26,21 +27,21 @@ public class PlatformLessonDocumentBackfill implements ApplicationRunner {
 
     @Override
     public void run(ApplicationArguments args) {
+        int count = 0;
+        while (true) {
         List<LegacyVersion> missing = db.query("""
                 SELECT v.id, v.content
                 FROM platform_lesson_version v
                 LEFT JOIN platform_lesson_version_structure s ON s.version_id = v.id
                 WHERE s.version_id IS NULL
-                ORDER BY v.created_at ASC
+                ORDER BY v.created_at ASC LIMIT 100
                 """, (rs, row) -> new LegacyVersion(rs.getString("id"), rs.getString("content")));
         for (LegacyVersion version : missing) {
-            documents.save(version.id(), LessonDocumentSupport.fromPlainText(version.content()),
-                    "LEGACY_FALLBACK", "PLAIN_TEXT", "1",
-                    List.of("该版本创建于结构化教案上线前，已从原正文生成兼容结构。"));
+            if (documents.insertIfAbsent(version.id(), version.content())) count++;
         }
-        if (!missing.isEmpty()) {
-            log.info("backfilled structured lesson documents for {} legacy versions", missing.size());
+        if (missing.isEmpty()) break;
         }
+        if (count > 0) log.info("inserted fallback structures for {} missing versions", count);
     }
 
     private record LegacyVersion(String id, String content) {

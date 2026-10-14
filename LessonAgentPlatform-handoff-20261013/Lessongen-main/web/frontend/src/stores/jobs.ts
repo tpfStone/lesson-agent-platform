@@ -95,7 +95,10 @@ export const useJobStore = defineStore("jobs", {
       }
     },
     async loadJob(id: string) {
-      this.current = await getJob(id);
+      const epoch = this.terminalEpoch;
+      const job = await getJob(id);
+      if (epoch !== this.terminalEpoch) return null;
+      this.current = job;
       return this.current;
     },
     async loadArtifacts(id: string) {
@@ -176,6 +179,13 @@ export const useJobStore = defineStore("jobs", {
       this.resultReady = false;
       this.artifactLoading = false;
       this.artifactsReady = false;
+    },
+    resetPrivate() {
+      const recent = this.recentRequestId + 1;
+      const terminal = this.terminalEpoch + 1;
+      this.$reset();
+      this.recentRequestId = recent;
+      this.terminalEpoch = terminal;
     },
   },
 });

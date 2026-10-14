@@ -1,0 +1,753 @@
+{
+  "date": "2026-10-14",
+  "baselineFileCount": 517,
+  "sourceFileCount": 581,
+  "baselineZipSha256": "c4a47cbff8d3a93446c99f87ab8cdb85135068bf6bdfb8a412661faf3c227b3e",
+  "provenance": "Local source snapshot; authoritative Git history unavailable.",
+  "exclusions": "Build/dependency/runtime artifacts and the two generated manifest files.",
+  "summary": {
+    "added": 65,
+    "modified": 58,
+    "deleted": 0
+  },
+  "changes": [
+    {
+      "path": ".gitignore",
+      "status": "modified",
+      "beforeSha256": "d39ed109d6fe3666c29cbcc426913ca75f6238a4d28b97d3d2066b95b66b6fc8",
+      "afterSha256": "bbb9effa1ad008aa1ddeadfd025f389127a264378bd4fa64e7d2e4c68468f224"
+    },
+    {
+      "path": ".nvmrc",
+      "status": "added",
+      "beforeSha256": null,
+      "afterSha256": "3151949a8b43e7df5385b69fbaeb5652bbdc7f7924e4278d550348f42b103f13"
+    },
+    {
+      "path": "Lessongen-main/paper4_pipeline/README.md",
+      "status": "added",
+      "beforeSha256": null,
+      "afterSha256": "36440ce8cb176ccfcd6593467e3feda6b032e2530c108dd281486554b7b994cf"
+    },
+    {
+      "path": "Lessongen-main/paper4_pipeline/tests/test_docx_contract.py",
+      "status": "added",
+      "beforeSha256": null,
+      "afterSha256": "ac76bb3c9127f8d5f5e9bd7db511fc3615aa79d2cbcc1de1d2634944b16c5bc9"
+    },
+    {
+      "path": "Lessongen-main/web/frontend/e2e/account-and-adoption.spec.ts",
+      "status": "added",
+      "beforeSha256": null,
+      "afterSha256": "b025ab5de3e62da596923c996d743a6a7221ae53e2c18ecf8ea83503d8e22222"
+    },
+    {
+      "path": "Lessongen-main/web/frontend/e2e/version-selection.spec.ts",
+      "status": "added",
+      "beforeSha256": null,
+      "afterSha256": "9469b7854119e35137e66a1d8b3dae1185592f0ec58c375f83a3e9a19e2331bf"
+    },
+    {
+      "path": "Lessongen-main/web/frontend/playwright.config.ts",
+      "status": "added",
+      "beforeSha256": null,
+      "afterSha256": "b6785d43d469bc5723e222a623890cf6839e4923360574802a35bc9db4f71967"
+    },
+    {
+      "path": "Lessongen-main/web/frontend/scripts/capture-ui.mjs",
+      "status": "added",
+      "beforeSha256": null,
+      "afterSha256": "84271863e1a7997d9194697e59922c2aed9c41704b108ae39cc160d2ea9d2868"
+    },
+    {
+      "path": "Lessongen-main/web/frontend/scripts/test-e2e.mjs",
+      "status": "added",
+      "beforeSha256": null,
+      "afterSha256": "2cf644545d3ce41d5434239b18c17c8b2fdfef427d7e60f984c81143b73a716f"
+    },
+    {
+      "path": "Lessongen-main/web/frontend/src/App.vue",
+      "status": "modified",
+      "beforeSha256": "822aa0465ac9207458457d835ba26abb9189bf2b5ecb6e344e147609c796b2e9",
+      "afterSha256": "bb21a7b6a00843bc32352eaa2fcfeabab99b372a9cddddf8c1ee13842d443311"
+    },
+    {
+      "path": "Lessongen-main/web/frontend/src/api/privateContext.ts",
+      "status": "added",
+      "beforeSha256": null,
+      "afterSha256": "88b85c14407e3cc48f2777eaacc6335fa0ee0fdd140b22e8fc2ba6bf981e5c82"
+    },
+    {
+      "path": "Lessongen-main/web/frontend/src/components/LessonDocumentPreview.vue",
+      "status": "added",
+      "beforeSha256": null,
+      "afterSha256": "776416702557f9cec17d8e470b2db08822be07b249df6e31f2e0cd49e285f543"
+    },
+    {
+      "path": "Lessongen-main/web/frontend/src/components/LessonImportPanel.vue",
+      "status": "modified",
+      "beforeSha256": "875dd63d20378a43b4c1e5d34bb771a482236febfb4ef12ef9de74e545e0f1c0",
+      "afterSha256": "3dd3275bcf91b9846123d18a6123cfd518726a71be466f5383f0facf40a843da"
+    },
+    {
+      "path": "Lessongen-main/web/frontend/src/components/LessonIssuePanel.vue",
+      "status": "added",
+      "beforeSha256": null,
+      "afterSha256": "ecbedfd15e3367cfd0748d6b6bebb6095aae7d563b0e668a25cd4f4df025b877"
+    },
+    {
+      "path": "Lessongen-main/web/frontend/src/composables/useVersionDocument.ts",
+      "status": "added",
+      "beforeSha256": null,
+      "afterSha256": "89ea1047a1cbfa6f94692870f7d32438dcd3738c8c327617fe2a3a6c2b23def3"
+    },
+    {
+      "path": "Lessongen-main/web/frontend/src/main.ts",
+      "status": "modified",
+      "beforeSha256": "1eec9228ab71726e3ac775011472af5922b2fe9cd509165436b0039e23d11068",
+      "afterSha256": "64291b1f32e736a4d2e3df7e9f8cdac22e53b1f8b4868a7ddf2449cd95aa32b6"
+    },
+    {
+      "path": "Lessongen-main/web/frontend/src/stores/auth.ts",
+      "status": "modified",
+      "beforeSha256": "c18e1dd89d8dcb4deb441581683ed3f93698265ecbaf8cc82403728088d524d9",
+      "afterSha256": "a9d5c68321277b4cd3eaf50fe60451030ccd49c9716a06c4b2e893e490254268"
+    },
+    {
+      "path": "Lessongen-main/web/frontend/src/stores/jobs.ts",
+      "status": "modified",
+      "beforeSha256": "30532fd339795269c32a5535519c7bd262fdea4649164a2733523d66e7232749",
+      "afterSha256": "21feebd675cb7b0e03a0f2770f49ca5ed0f9a27af8edc26dc6780079a5b7307c"
+    },
+    {
+      "path": "Lessongen-main/web/frontend/src/types/lesson-document.ts",
+      "status": "added",
+      "beforeSha256": null,
+      "afterSha256": "af49798e8efd6b2118a071bebf8f927a2c3c7e09e4938630399f2a93324759ac"
+    },
+    {
+      "path": "Lessongen-main/web/frontend/src/views/AnnotationView.vue",
+      "status": "modified",
+      "beforeSha256": "a6bd0455ec9e017bbba7c70478e01cb6443cec3f20228e5526248f92b30ceca4",
+      "afterSha256": "848be7a0fcf425ff05eb119f2cc45ac4639322d9ba0ac14df6ffc188fa88e3ec"
+    },
+    {
+      "path": "Lessongen-main/web/frontend/src/views/JobView.vue",
+      "status": "modified",
+      "beforeSha256": "325a234d0eee77699c96c7d07fd2a038d06b71debc9c6bc35f0c522f0f6f7985",
+      "afterSha256": "ec3b139a3ef0dd1e3a7b9dc2ae0e2a89f797c6aab2717798417a3e123541fef8"
+    },
+    {
+      "path": "Lessongen-main/web/frontend/src/views/LessonSpaceView.vue",
+      "status": "modified",
+      "beforeSha256": "4bf686b5d6db1c618850700767487ecd0e2fefec3f4af6c90714aa239b5e8f91",
+      "afterSha256": "9beb8c6f1a4438d80bf4b644cabc413f9a02f1f354beb6c18b8574bb3717fac4"
+    },
+    {
+      "path": "Lessongen-main/web/frontend/src/views/PlatformOptimizeView.vue",
+      "status": "modified",
+      "beforeSha256": "9c1cb2587daeb8499422d122bd3b9828bfadc732101c98c3021b8838875a2587",
+      "afterSha256": "a0fb8c4c8ab2fa4d9490c54942877f13b34d44559ce52823f3352705a241d312"
+    },
+    {
+      "path": "Lessongen-main/web/frontend/src/views/SimulationView.vue",
+      "status": "modified",
+      "beforeSha256": "6a4377d94a150f9823758e2441ade790dc7e9bad61e25c1ce2dcbfc9841deb3d",
+      "afterSha256": "3b9b841980ac67d80648b7c8d8d60b3a0a66cb08fc871df877dc0caafd464dc4"
+    },
+    {
+      "path": "Lessongen-main/web/frontend/tests/auth-private-state.spec.ts",
+      "status": "added",
+      "beforeSha256": null,
+      "afterSha256": "cc741546edfc6fa95dce0d8e780a4d2358d9d8f020c1bf54d191a7640dfb3794"
+    },
+    {
+      "path": "Lessongen-main/web/frontend/tests/lesson-document-preview.spec.ts",
+      "status": "added",
+      "beforeSha256": null,
+      "afterSha256": "c63c0c2b7557183b58c3d7d18031779dc4818981c51d4124b280d1ea308cf53b"
+    },
+    {
+      "path": "Lessongen-main/web/frontend/tests/setup.ts",
+      "status": "added",
+      "beforeSha256": null,
+      "afterSha256": "6ca0cd83fa2d65906554e4e1be9c467c5b17c64713194d353483a3b1214a1dfc"
+    },
+    {
+      "path": "Lessongen-main/web/frontend/tests/version-selection.spec.ts",
+      "status": "added",
+      "beforeSha256": null,
+      "afterSha256": "b00224c5bae6cc8414c2737e78946f09418abcf3db4354b42e8007d4be2ff74c"
+    },
+    {
+      "path": "Lessongen-main/web/scripts/f3-runner/adapters/f4_f3_adapter.py",
+      "status": "modified",
+      "beforeSha256": "4c17a8104a99ed1f19dead57622938f3c7b95f6c2a81399af0240969c525705a",
+      "afterSha256": "9af7c91398221309de685a8c12557a6792bec0d91c4cc3860cfa1fbb364588b6"
+    },
+    {
+      "path": "Lessongen-main/web/scripts/f3-runner/run_f3_demo.py",
+      "status": "modified",
+      "beforeSha256": "e8f324f62094d2f89d0fd7ed5c6fd7795b05e1a91b5b8ac503769a165b91154d",
+      "afterSha256": "646c0e546e84c154322f0426c7a0fea6d092b713ee4f694462834a31b15686d5"
+    },
+    {
+      "path": "Lessongen-main/web/scripts/f3-runner/tests/test_material_transport.py",
+      "status": "added",
+      "beforeSha256": null,
+      "afterSha256": "1f0e6c4f73e8faf2d8d0a772800213cf179cc6638cfd06b57c7c7bf304f6e08f"
+    },
+    {
+      "path": "Lessongen-main/web/src/main/java/com/zone/lesoongen/LesoongenApplication.java",
+      "status": "modified",
+      "beforeSha256": "dc875ea492c0eb56a954eeb0deddde595f1526d163f77b5924c3b184a688b9c4",
+      "afterSha256": "2719f3c6428fd1abf0ee4a27e9fa0a327eaa917dbaa64e40eaaf79925d25ba91"
+    },
+    {
+      "path": "Lessongen-main/web/src/main/java/com/zone/lesoongen/platform/DocxLessonExtractor.java",
+      "status": "modified",
+      "beforeSha256": "3ea39eb3735390c72f4776fee880718ede44d73562693d14af90b52205ed9610",
+      "afterSha256": "38d2fc3deb73a2fefb026978c9715eab9ef1a4d0f1eeef9620f0991b0c51a27c"
+    },
+    {
+      "path": "Lessongen-main/web/src/main/java/com/zone/lesoongen/platform/F2LessonDocumentMapper.java",
+      "status": "added",
+      "beforeSha256": null,
+      "afterSha256": "d0bd37f8d66b62f5d769f7e66716c5839ebfbcffe371d7bc324f371ee4c5d50e"
+    },
+    {
+      "path": "Lessongen-main/web/src/main/java/com/zone/lesoongen/platform/LegacyLessonDocumentSupport.java",
+      "status": "added",
+      "beforeSha256": null,
+      "afterSha256": "69887f188d3f72739d2ca8c445af8108c37c0963001441bbd8cc28e5e0d95d89"
+    },
+    {
+      "path": "Lessongen-main/web/src/main/java/com/zone/lesoongen/platform/LessonDocument.java",
+      "status": "modified",
+      "beforeSha256": "efa8abab779b6e6d6d74c6cd145164a642c7bfe44d7dfca3ff2d1a9d081d153a",
+      "afterSha256": "62f7d02f93670880998b30e70f07a349524e7943186f6c3d4c08b94a00c22cc0"
+    },
+    {
+      "path": "Lessongen-main/web/src/main/java/com/zone/lesoongen/platform/LessonDocumentDocxExporter.java",
+      "status": "added",
+      "beforeSha256": null,
+      "afterSha256": "55aaa041e84d8b48dee053d3005721d20b50a961ef7637cdc9399a0f7629a0c2"
+    },
+    {
+      "path": "Lessongen-main/web/src/main/java/com/zone/lesoongen/platform/LessonDocumentFiles.java",
+      "status": "added",
+      "beforeSha256": null,
+      "afterSha256": "aade7d03f2d8178edaa5a34aa412194a0e73087d07e456a04885e9b92bcf4141"
+    },
+    {
+      "path": "Lessongen-main/web/src/main/java/com/zone/lesoongen/platform/LessonDocumentMaterialAdapter.java",
+      "status": "added",
+      "beforeSha256": null,
+      "afterSha256": "93b23f868455003818ad71ab7ecf65c8d45fd40cfc86e23d567cae181f6fe826"
+    },
+    {
+      "path": "Lessongen-main/web/src/main/java/com/zone/lesoongen/platform/LessonDocumentProjection.java",
+      "status": "added",
+      "beforeSha256": null,
+      "afterSha256": "448a04f3d3a99ec415aeaabde8f2a1727aa6e4e8d40a6cce492f962d1378aee8"
+    },
+    {
+      "path": "Lessongen-main/web/src/main/java/com/zone/lesoongen/platform/LessonDocumentSupport.java",
+      "status": "modified",
+      "beforeSha256": "23287b53acd3233ea78cfc82781ccae5151fbc0c3a82658b1880daa12f0558e4",
+      "afterSha256": "319d3025eac5a1b1d92741a1dac985a9103c22b78a85435cc1ab6a4e89bbb5de"
+    },
+    {
+      "path": "Lessongen-main/web/src/main/java/com/zone/lesoongen/platform/LessonDocumentValidator.java",
+      "status": "added",
+      "beforeSha256": null,
+      "afterSha256": "9877dc8457c57b1df66ad64c454f141ecd2cbe43977bb02eedcc9927633f4f72"
+    },
+    {
+      "path": "Lessongen-main/web/src/main/java/com/zone/lesoongen/platform/LessonStructureRepairCommand.java",
+      "status": "added",
+      "beforeSha256": null,
+      "afterSha256": "9ab8db4c1292fee70197327926ff56527c03c95bb9ea336512c5fb68f157829e"
+    },
+    {
+      "path": "Lessongen-main/web/src/main/java/com/zone/lesoongen/platform/LessonStructureRepairService.java",
+      "status": "added",
+      "beforeSha256": null,
+      "afterSha256": "dc6995e0df8d2c640353f21b3f7eb4b14c04ad222ce8be4eaaeea0f3e71af1ee"
+    },
+    {
+      "path": "Lessongen-main/web/src/main/java/com/zone/lesoongen/platform/LessonVersionPdfService.java",
+      "status": "added",
+      "beforeSha256": null,
+      "afterSha256": "0e245a4d7ecbe0ee296913a86aaf9012e217821cc0925fa8060c25657d460f4d"
+    },
+    {
+      "path": "Lessongen-main/web/src/main/java/com/zone/lesoongen/platform/LessonVersionWriteService.java",
+      "status": "added",
+      "beforeSha256": null,
+      "afterSha256": "bc2e4f99d7bf9b07e7da672b681a4eb17aa837c31f33fc58298bc40d2107ad61"
+    },
+    {
+      "path": "Lessongen-main/web/src/main/java/com/zone/lesoongen/platform/PlatformAnnotationBatchController.java",
+      "status": "modified",
+      "beforeSha256": "6b18a73df5b8e56b9d798947cc7ae0b5eb098148342ecf6158d6a98761a5f95a",
+      "afterSha256": "8c15ba8a66dca7fe890d391c2b5eb187848b8f801d1e0c844aea0fa9cd3f71c1"
+    },
+    {
+      "path": "Lessongen-main/web/src/main/java/com/zone/lesoongen/platform/PlatformAnnotationController.java",
+      "status": "modified",
+      "beforeSha256": "04a6a36269c5878b499e9844fb88025ef6d27765efd3da79f762ab366971aa5a",
+      "afterSha256": "4e2fdde6c3f7eb18f6bdae074717ceb1b4857e456478c75cfd37d1b1579e4eaa"
+    },
+    {
+      "path": "Lessongen-main/web/src/main/java/com/zone/lesoongen/platform/PlatformAnnotationService.java",
+      "status": "modified",
+      "beforeSha256": "0912cbbf061ab928a518a64c559e425de4bfced8d4e22c9dc211e4fe017f7bd7",
+      "afterSha256": "7b870d896d146767978eec045dbe3792de1048d40db2c242e86dfeccc9c352bc"
+    },
+    {
+      "path": "Lessongen-main/web/src/main/java/com/zone/lesoongen/platform/PlatformGeneratedLessonController.java",
+      "status": "added",
+      "beforeSha256": null,
+      "afterSha256": "46a8993914e214ae82e54848fa7cf2f5932849272a779d87695547e9e61f19fa"
+    },
+    {
+      "path": "Lessongen-main/web/src/main/java/com/zone/lesoongen/platform/PlatformGeneratedLessonService.java",
+      "status": "added",
+      "beforeSha256": null,
+      "afterSha256": "09158aa5cafe08fc2b3e6b0c1b4489effc7ddc2634cc87a0238537ef8b4b600c"
+    },
+    {
+      "path": "Lessongen-main/web/src/main/java/com/zone/lesoongen/platform/PlatformIssueController.java",
+      "status": "modified",
+      "beforeSha256": "dff73cc768656482d6d0e31a67f0947c747cd35cf0b0674fb49d39c54cd7df79",
+      "afterSha256": "2fde6dfccbb25ddbbd3831b7bccfec4c4305a74760e6cc9e6df8a993ac7f5a69"
+    },
+    {
+      "path": "Lessongen-main/web/src/main/java/com/zone/lesoongen/platform/PlatformIssueIngestService.java",
+      "status": "modified",
+      "beforeSha256": "98f8b128dcddbe6824e6f652ceada0ecc8f4db2fba5fc022b950cfc96ee44bb3",
+      "afterSha256": "2763b3c541685f70651a5abc5c14ad1da22e75e2630b27aedb6ed23f074840dd"
+    },
+    {
+      "path": "Lessongen-main/web/src/main/java/com/zone/lesoongen/platform/PlatformIssueService.java",
+      "status": "modified",
+      "beforeSha256": "2a2829ba6e0c4fed133eb69944c05de46d1b50ed698d7501e9fad5fba93feb37",
+      "afterSha256": "d5aaea111f1884e8d0bccf08c0dede0c6d782772129f255258f164cb678f8ab9"
+    },
+    {
+      "path": "Lessongen-main/web/src/main/java/com/zone/lesoongen/platform/PlatformIssueSyncService.java",
+      "status": "added",
+      "beforeSha256": null,
+      "afterSha256": "a336c306ea5ff90eca27c5edf9c8a348c60011971156acf59cba3345148320d2"
+    },
+    {
+      "path": "Lessongen-main/web/src/main/java/com/zone/lesoongen/platform/PlatformLessonDocumentBackfill.java",
+      "status": "modified",
+      "beforeSha256": "4ee55d3ca5721429e08b6c694eba17c2f3c9a33234b4bbba87b685107b367abd",
+      "afterSha256": "0431d28e0c66e3d695e23b07bf997a867be0c050a7977ee56a92f7b02a8b6a63"
+    },
+    {
+      "path": "Lessongen-main/web/src/main/java/com/zone/lesoongen/platform/PlatformLessonDocumentService.java",
+      "status": "modified",
+      "beforeSha256": "c23cbc0cfcc6fbb6ab65d66eaa3286b14d0897f85124d59dc26c16ac413c8ee8",
+      "afterSha256": "db2384439a972268cb89c5373f59e8049862e05430b939f783cd4ce188e32fce"
+    },
+    {
+      "path": "Lessongen-main/web/src/main/java/com/zone/lesoongen/platform/PlatformLessonExportController.java",
+      "status": "modified",
+      "beforeSha256": "3dda31f80d7bb0a1a6c683b7df165bf7cedff1ddcf18b9d2fbb7aa108d0d443c",
+      "afterSha256": "a8ee26bfabfa1fba1f1d7b4596497e922faba451655d4975a1809ed78baa6f82"
+    },
+    {
+      "path": "Lessongen-main/web/src/main/java/com/zone/lesoongen/platform/PlatformLessonImportService.java",
+      "status": "modified",
+      "beforeSha256": "cf87af263bf3d200e9ec94103667b34c315a92f7949b0f9d8c04f41313921615",
+      "afterSha256": "ec0451feb8102ca5401928b4f9f0b42abf4d1f6bdcc57ef61955b1d613f3095d"
+    },
+    {
+      "path": "Lessongen-main/web/src/main/java/com/zone/lesoongen/platform/PlatformLessonService.java",
+      "status": "modified",
+      "beforeSha256": "b00f54a877e707d1f34c42477b0f27a10621e56764543a6ecaa80ef99498002e",
+      "afterSha256": "a3d238b40b0fe8d05aaec986b71314c20b9a34b726c13084a24c74928cacedf6"
+    },
+    {
+      "path": "Lessongen-main/web/src/main/java/com/zone/lesoongen/platform/PlatformNavigationBridgeService.java",
+      "status": "modified",
+      "beforeSha256": "e3561236114ba3b449a2823090078b3d6c3c7686d3f7f1b6b49185f1437d1edf",
+      "afterSha256": "a0cd7f161b342820892b77f9e9372830a2df390016477800030519f7109c18c6"
+    },
+    {
+      "path": "Lessongen-main/web/src/main/java/com/zone/lesoongen/platform/PlatformOptimizeService.java",
+      "status": "modified",
+      "beforeSha256": "ac8785785a9ccc786b14dea446f8d42bfd1cabe7bb65d70619b6d89e8b3dd030",
+      "afterSha256": "4f5af07cc1a3dd1efeb0aa995fb97a88036f848b8df05e9e10b0ecae92706325"
+    },
+    {
+      "path": "Lessongen-main/web/src/main/java/com/zone/lesoongen/platform/PlatformSimulationController.java",
+      "status": "modified",
+      "beforeSha256": "37b8a785a96709d249b521cfd2ae10637f41d3976af57d0fa8982749f7e12a77",
+      "afterSha256": "225836dbc3fd01497628f285e435e8bb4e68562eba6c83a0e41a62efbe7395ec"
+    },
+    {
+      "path": "Lessongen-main/web/src/main/java/com/zone/lesoongen/platform/PlatformSimulationLaunchService.java",
+      "status": "modified",
+      "beforeSha256": "cf0a1502c6f9493e5bd1b542ba3308a715a9dfaa8d265e5b0df1d079fdbc5d95",
+      "afterSha256": "b9e02e9a55b485ab475fd230acf3e63f1e3c80fbf9053628f8ec091253a8033f"
+    },
+    {
+      "path": "Lessongen-main/web/src/main/java/com/zone/lesoongen/platform/PlatformSimulationService.java",
+      "status": "modified",
+      "beforeSha256": "77dfc92b8471a2925a4966c4e26539b5a725d3188a02f3a677dda76b735c4c94",
+      "afterSha256": "695851a0e52972bc424aa1fa3f3e1c1d7c68ed8914f4f4c4d7e52897a145cafb"
+    },
+    {
+      "path": "Lessongen-main/web/src/main/java/com/zone/lesoongen/platform/VersionWriteCommand.java",
+      "status": "added",
+      "beforeSha256": null,
+      "afterSha256": "201b016575eb4766ff587c37b3e77cb300c54d8c2789bc6e5c883c0ffbce4c13"
+    },
+    {
+      "path": "Lessongen-main/web/src/main/resources/application-structure-repair.yml",
+      "status": "added",
+      "beforeSha256": null,
+      "afterSha256": "6e57bb073b6141404c9cee46707f8bbbee1555a53b1561cb1292359aa695d562"
+    },
+    {
+      "path": "Lessongen-main/web/src/main/resources/db/migration/V18__version_structure_contract.sql",
+      "status": "added",
+      "beforeSha256": null,
+      "afterSha256": "7934f6208625a573ccfb7bae905e1bf3ef786c6aa5d0faec9648b04ba5f475c7"
+    },
+    {
+      "path": "Lessongen-main/web/src/main/resources/db/migration/V19__generated_lesson_adoption.sql",
+      "status": "added",
+      "beforeSha256": null,
+      "afterSha256": "6f9e513ac86ed5c5cf370e77c5757dd9e83c8359be9a8fe7849fc6f4cea0514f"
+    },
+    {
+      "path": "Lessongen-main/web/src/main/resources/db/migration/V21__annotation_submission_intent.sql",
+      "status": "added",
+      "beforeSha256": null,
+      "afterSha256": "1a8d91aa075e00563ec1ef7142b76f2a9ac3bb35d91235db64eefdbafa5a5e98"
+    },
+    {
+      "path": "Lessongen-main/web/src/main/resources/db/migration/V22__issue_resolution_and_sync.sql",
+      "status": "added",
+      "beforeSha256": null,
+      "afterSha256": "3a6e99d4f71cf6e13aa2f891132a7e6b26811d01cab41f8d4bf82b2df7bf3660"
+    },
+    {
+      "path": "Lessongen-main/web/src/main/resources/db/migration/V23__simulation_analysis_revisions.sql",
+      "status": "added",
+      "beforeSha256": null,
+      "afterSha256": "f2b4d8a952791e16675a7b6292c2daa55edc1529d6465fde8709f0c79b681bce"
+    },
+    {
+      "path": "Lessongen-main/web/src/main/resources/db/migration/V24__annotation_batch_submission.sql",
+      "status": "added",
+      "beforeSha256": null,
+      "afterSha256": "54d53171c0ee58f96ef2449da59f567f2928786a89c7503bd3801dcc6ccdd337"
+    },
+    {
+      "path": "Lessongen-main/web/src/main/resources/db/migration/V25__navigation_structured_snapshots.sql",
+      "status": "added",
+      "beforeSha256": null,
+      "afterSha256": "d67ff9a84c26caa827ba7678d426cfef7327051063c13fed214c4642e1f959e8"
+    },
+    {
+      "path": "Lessongen-main/web/src/main/resources/db/vendor/mysql/V20__simulation_stop_reason.sql",
+      "status": "added",
+      "beforeSha256": null,
+      "afterSha256": "48a49bcd3e17d3ed1b251d84eac26e3defff7423fb42a5ad7e0ee9a9842b1297"
+    },
+    {
+      "path": "Lessongen-main/web/src/test/java/com/zone/lesoongen/platform/LessonDocumentContractTest.java",
+      "status": "added",
+      "beforeSha256": null,
+      "afterSha256": "c988eb7c0cafb693247f3e1d859754143380ee64dfaad8ded2a20527b6e8fc8a"
+    },
+    {
+      "path": "Lessongen-main/web/src/test/java/com/zone/lesoongen/platform/LessonDocumentSupportTest.java",
+      "status": "modified",
+      "beforeSha256": "66ea8876476b81f948c196e312224f56c88b4b6d0d0d83663f5dd9e59df06534",
+      "afterSha256": "d78f1063c32f3c64769d5c941ca8e3d47253ef0bac97f0e2a5ba0282db99b4e1"
+    },
+    {
+      "path": "Lessongen-main/web/src/test/java/com/zone/lesoongen/platform/LessonVersionWriteServiceTest.java",
+      "status": "added",
+      "beforeSha256": null,
+      "afterSha256": "78681d6d8d8c05d710a9bd3184e84c4dbcdeb8660968559a5f93ca6112c6c162"
+    },
+    {
+      "path": "Lessongen-main/web/src/test/java/com/zone/lesoongen/platform/OriginalLessonFixtureTest.java",
+      "status": "added",
+      "beforeSha256": null,
+      "afterSha256": "fcd66a7e00ccc2d24fd769b90b391f2f9dc22377fc4a3c116143d23303e41bd2"
+    },
+    {
+      "path": "Lessongen-main/web/src/test/java/com/zone/lesoongen/platform/PlatformAdoptionTest.java",
+      "status": "added",
+      "beforeSha256": null,
+      "afterSha256": "6b6242d180c4e39e3649f5828f13372d3d09bdfe0862b45cd917bf22f9660b13"
+    },
+    {
+      "path": "Lessongen-main/web/src/test/java/com/zone/lesoongen/platform/PlatformIssueApiTest.java",
+      "status": "modified",
+      "beforeSha256": "5be49fc2294751a1b8c45c0ea7b7eed5f335de5732af7c7213a73b6fa1ea7f92",
+      "afterSha256": "835e0908e927470cee4588eb3db6de3d09726057506e5ea9bd10421a529511ed"
+    },
+    {
+      "path": "Lessongen-main/web/src/test/java/com/zone/lesoongen/platform/PlatformLessonImportApiTest.java",
+      "status": "modified",
+      "beforeSha256": "ec0c6b8a03af8b933c4e6f71b35b46a7396dc0083fb2b15b2ff75f9c9fd04a97",
+      "afterSha256": "23f8f60ef7174585600ca5aa58d5fc478bdbab52aaf101334f26ff8597675c49"
+    },
+    {
+      "path": "Lessongen-main/web/src/test/java/com/zone/lesoongen/platform/PlatformSimulationApiTest.java",
+      "status": "modified",
+      "beforeSha256": "c117b137c4e6ebe534ab56524e100d05028b6d87864efd4bb4e4ec317bdf3c6f",
+      "afterSha256": "115f13dbc8e83b4ef32f5f9873fbbfdc10558e4684df2ba7072689f042bfc9b5"
+    },
+    {
+      "path": "Lessongen-main/web/src/test/java/com/zone/lesoongen/platform/PlatformStructuredExportTest.java",
+      "status": "added",
+      "beforeSha256": null,
+      "afterSha256": "f17fef241ba8e168794bbca462e3a66fda774675a548bcd7294839be3320e895"
+    },
+    {
+      "path": "Lessongen-main/web/src/test/resources/db/vendor/h2/V20__simulation_stop_reason.sql",
+      "status": "added",
+      "beforeSha256": null,
+      "afterSha256": "546d0a777954c315fd3e7d37dd0ac3344b32aaf8d6bb1607980ec0fb92969669"
+    },
+    {
+      "path": "Lessongen-main/web/src/test/resources/fixtures/original-v0-structure.json",
+      "status": "added",
+      "beforeSha256": null,
+      "afterSha256": "d9ecee40dec47a61c47d31a84437c0b2f698fa41dbd84fc1abf106f8f700c779"
+    },
+    {
+      "path": "NoviceTeacher-AI-main/backend/app/api.py",
+      "status": "modified",
+      "beforeSha256": "a792aa6e0e2390fad9a5573579e0600f0d32280a2c8d9c58e027b0ff3cc3a6eb",
+      "afterSha256": "d27790c6ee2f1ae0db4194b6d7d96e14003bd21c80302b9ee27caa1ef91f612a"
+    },
+    {
+      "path": "NoviceTeacher-AI-main/backend/app/models.py",
+      "status": "modified",
+      "beforeSha256": "26e889d500f2a843103b8113acf028b958cf9309bcd3d9ca391b767e9b5ca793",
+      "afterSha256": "54bccb43732ec5f8ebc1252819abe7efbd92181c8d9d3ba0d7e34d809c384fca"
+    },
+    {
+      "path": "NoviceTeacher-AI-main/backend/app/schemas.py",
+      "status": "modified",
+      "beforeSha256": "8113cca744307cd4485c38c480ee7ea8762126126aca4c29d724afe99a8a3db3",
+      "afterSha256": "af1dcae9394ac6b9b3dc0d7fe51d68a7b62a27e173f7cca37ccfbff9876e37f2"
+    },
+    {
+      "path": "NoviceTeacher-AI-main/backend/app/structured_adapter.py",
+      "status": "added",
+      "beforeSha256": null,
+      "afterSha256": "17f0eb85efff55541304ace46d218e51ecd50837433967a60224e1c719751d3c"
+    },
+    {
+      "path": "NoviceTeacher-AI-main/backend/app/workflow.py",
+      "status": "modified",
+      "beforeSha256": "a4378bb4c9635b1b5b8c9d876b1a311d522a6919f0b29c0231adfa5305bb6f85",
+      "afterSha256": "838973c1cc8bcf076f84293eee8e8390130994b627c2abf37ed0e50ccf496ed0"
+    },
+    {
+      "path": "NoviceTeacher-AI-main/backend/migrations/versions/20261014_generation_claims.py",
+      "status": "added",
+      "beforeSha256": null,
+      "afterSha256": "bee6e2750bc7927b0c4e035ca42a3ed1f3984587f0e8ad462ca05fa548410edf"
+    },
+    {
+      "path": "NoviceTeacher-AI-main/backend/migrations/versions/20261014_structured_lessons.py",
+      "status": "added",
+      "beforeSha256": null,
+      "afterSha256": "5f054878746aeb1154d49d7a45c26661dc245a183812f5670fa3005e1516e05f"
+    },
+    {
+      "path": "NoviceTeacher-AI-main/backend/tests/test_concurrent_generation.py",
+      "status": "added",
+      "beforeSha256": null,
+      "afterSha256": "b820f369dcb8eeccf217ed27b2e6db9b40677d8272c88debb0e66bd7f238c223"
+    },
+    {
+      "path": "NoviceTeacher-AI-main/backend/tests/test_structured_lifecycle.py",
+      "status": "added",
+      "beforeSha256": null,
+      "afterSha256": "ed9c121c00d0891a03ee54805676ac11b42b9a1e82ad7a41aa6b5c04fd8749fa"
+    },
+    {
+      "path": "SimClass-main/app/agents/base.py",
+      "status": "modified",
+      "beforeSha256": "3cf6bb924570a87b60857d543d93fe65d3523d0084081d82219df072fd2901e8",
+      "afterSha256": "8c0a38d84db63aa667bd6c940b20d7fac2e05df160785da85a502c92697094ac"
+    },
+    {
+      "path": "SimClass-main/app/analysis/issue_agent.py",
+      "status": "modified",
+      "beforeSha256": "1339496f31ad28f0f4c0706c7571580545bb51a57e16ff412210a1608039caaf",
+      "afterSha256": "929131a495a24fb88d1cd0b7f15e9395ad2f985b7b7a566dffd02fb22731ba8e"
+    },
+    {
+      "path": "SimClass-main/app/api/classroom_api.py",
+      "status": "modified",
+      "beforeSha256": "e8d238f320def82f601e53a3e2c5033e901feda88498951cd0fcc1bfd5cd2d64",
+      "afterSha256": "adcae221293846ef1a4f6e6730a8736405bff0f7844e9b6473cdbc107bb5a3d2"
+    },
+    {
+      "path": "SimClass-main/app/contracts/analysis.py",
+      "status": "modified",
+      "beforeSha256": "bb7d6bfdc5b52d44b78b3cfaaf655667da85013fe5918892e7d7bdf831ac6c93",
+      "afterSha256": "ea0300e84da1df599102b288758f984eaf51ef894c58ba47f78d30c11d4adcbe"
+    },
+    {
+      "path": "SimClass-main/app/contracts/session.py",
+      "status": "modified",
+      "beforeSha256": "a32b483a4f8a5726136c5b2dfd3ba1e5c7171270e20f7fc9027e4118148ffbde",
+      "afterSha256": "1963b541c0e0e17deadbb0a3e9047a29d790ea285e9ce21f32456d8e1b19f0a4"
+    },
+    {
+      "path": "SimClass-main/app/llm/provider.py",
+      "status": "modified",
+      "beforeSha256": "64c339f9492f09e26d78655daa181944d54f2d85d3962bbeb533bfd8a2c7bbc9",
+      "afterSha256": "6bd5db4b0c893ac660808334e93f666372a084cd1ce7ce9da2426807cd59bbeb"
+    },
+    {
+      "path": "SimClass-main/app/web/service.py",
+      "status": "modified",
+      "beforeSha256": "fec315226354bbafa122ee28ccd7e3daeba4185d585576f70cdf384db5fbf524",
+      "afterSha256": "a6fab2fd718c6e3b76fb12de429d641d3406325a7c0264c25f85af076a9ae345"
+    },
+    {
+      "path": "SimClass-main/tests/test_lifecycle_recovery.py",
+      "status": "added",
+      "beforeSha256": null,
+      "afterSha256": "69aa75e5ecf44aaacb855d0621a8a9e4508f50e045f74eb1a996cb0861107069"
+    },
+    {
+      "path": "SimClass-main/tests/test_material_contract.py",
+      "status": "added",
+      "beforeSha256": null,
+      "afterSha256": "bd45db0887f42149d80bb64ed3a4d7c2919e58e8d05d5c7612a38c7c71213565"
+    },
+    {
+      "path": "System-v1.2/platform_api.py",
+      "status": "modified",
+      "beforeSha256": "5da9a4bcd9cbf8d922b1f2c0019070febeae13f942ec253b2437ddcea2b4980f",
+      "afterSha256": "ea71663ba42400d58e362b1d5490f1a45bf15e01d8038833f27b71a378f1b51f"
+    },
+    {
+      "path": "System-v1.2/platform_task_store.py",
+      "status": "added",
+      "beforeSha256": null,
+      "afterSha256": "21af87cd5e7ed34ea4d4974a87ee2dd522d8c955ba2b052e4be92247c3b42ea1"
+    },
+    {
+      "path": "System-v1.2/service.py",
+      "status": "modified",
+      "beforeSha256": "b99fb63fee5dad5d86f9db7cfa3f38f77b4576dc581b014bb9878a22d7e0f815",
+      "afterSha256": "4a6b74b71f407577c72de85d0a99cf95f986b6c5960f50117b9c71190e8db4d6"
+    },
+    {
+      "path": "System-v1.2/tests/test_artifact_status.py",
+      "status": "added",
+      "beforeSha256": null,
+      "afterSha256": "2b14cd8fb979d57bd3afe70ca359e8ee3e6841290d591c17b6dec1b542690dc8"
+    },
+    {
+      "path": "System-v1.2/tests/test_task_recovery.py",
+      "status": "added",
+      "beforeSha256": null,
+      "afterSha256": "2eba0dafc7ab1b969de43040fe7eb3f5269f4e4a1ab93b37b70eaefbc433121c"
+    },
+    {
+      "path": "docs/INSTALL_LINUX.md",
+      "status": "modified",
+      "beforeSha256": "bfc5e01b0f4122c6a73df74536dbb2e1fd1d01717edc4b8c5163245d7e3c1755",
+      "afterSha256": "65c80355f9b9d843c859de805e3fccd262e287ea290691eaddcf7a558817690e"
+    },
+    {
+      "path": "docs/INSTALL_WINDOWS.md",
+      "status": "modified",
+      "beforeSha256": "c3bfb6208449983aa779b17c7e05e46eb80b3eaae6fafccb11d85e100a7a1d14",
+      "afterSha256": "eba5ad29f1c8c0141ce9a2c19bc97c6ced8fe06c1ed832edbb827050cc5ccf8b"
+    },
+    {
+      "path": "docs/REPAIR_RESULTS_20261014.md",
+      "status": "added",
+      "beforeSha256": null,
+      "afterSha256": "df1bcbae2f1106564374435c02d99f92eca85aee77c2646bbd81deacfbefe286"
+    },
+    {
+      "path": "scripts/health-check.ps1",
+      "status": "modified",
+      "beforeSha256": "a6ecb6d23bddf5b19992391272749a48ef9236de1332c44272cfb8f3f10fccf7",
+      "afterSha256": "d59630e86651235c8f324fd481b9c8b475c43d98dd77c8401e49e045adb25bd6"
+    },
+    {
+      "path": "scripts/health-check.sh",
+      "status": "modified",
+      "beforeSha256": "41fb93994c5979e9fdd697ba7d0022ba0a5cdd43ad6862fdab7935f5753938a6",
+      "afterSha256": "946fe37dbce2baad494b3335db1c946dd4de7229f9f34f8861acf54e00189548"
+    },
+    {
+      "path": "scripts/health-status.py",
+      "status": "added",
+      "beforeSha256": null,
+      "afterSha256": "4034b55a327e36bc5e8998411e1cbe435448b6ea7f7663a6a061917fe028480f"
+    },
+    {
+      "path": "scripts/process-identity.ps1",
+      "status": "added",
+      "beforeSha256": null,
+      "afterSha256": "1a30a8b388c91fd1881d8654054b3f3d1afccd55660cbda4e19d813421b746c0"
+    },
+    {
+      "path": "scripts/process-identity.sh",
+      "status": "added",
+      "beforeSha256": null,
+      "afterSha256": "645eaecc449976f51baddd150c2c98fcb89df3ba188462218f54d11c0feebc3d"
+    },
+    {
+      "path": "scripts/start-all.ps1",
+      "status": "modified",
+      "beforeSha256": "2a7ec6e81dafdfebb308d4e19ff41a9335090709b79a2780d4831d68d39b2c28",
+      "afterSha256": "2fefd16743a71023f24edb62b4178e369cce70ed11078636c2b760686cd1b596"
+    },
+    {
+      "path": "scripts/start-all.sh",
+      "status": "modified",
+      "beforeSha256": "6e963beac225fde53efe8643a327ed01de463d91fb2343b3aedcf2df04d4ce19",
+      "afterSha256": "736b51c5c549d844d2bde1cef7bc90ffa55523aeed92a84d3b40af46a124f08b"
+    },
+    {
+      "path": "scripts/stop-all.ps1",
+      "status": "modified",
+      "beforeSha256": "a2fa889ec2650c58625e5f22fa4d04ec2946a6d71468a8918a0ba360138fd84e",
+      "afterSha256": "fadba1587793fe8da61ebd8ab1e76222a8c4ddadd6fc884d8b6ce41b87592c5e"
+    },
+    {
+      "path": "scripts/stop-all.sh",
+      "status": "modified",
+      "beforeSha256": "03b39ac5f7c00659e1b68e896d5425c43d6d0ef679d9735bdc25e7b0eb808048",
+      "afterSha256": "2278ff76074bce056db52741dbe15c63c5dbbc459c06be367a9bd650d1579bcf"
+    },
+    {
+      "path": "scripts/tests/test-process-identity.ps1",
+      "status": "added",
+      "beforeSha256": null,
+      "afterSha256": "a614f3a9e990efc6afe14e5465fa5b351ca6ceceb004f27815540e95ff0b6d64"
+    },
+    {
+      "path": "scripts/tests/test_health_status.py",
+      "status": "added",
+      "beforeSha256": null,
+      "afterSha256": "4df727895c32c49301c41fbde758c5637875e82b93d52d02cb39c7137d36cc8b"
+    }
+  ]
+}

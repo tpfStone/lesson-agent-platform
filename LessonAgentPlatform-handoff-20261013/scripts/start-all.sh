@@ -10,6 +10,7 @@ elif [[ $# -gt 0 ]]; then
 fi
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$ROOT/scripts/process-identity.sh"
 ENV_FILE="$ROOT/.env"
 RUNTIME="$ROOT/.runtime"
 LOGS="$RUNTIME/logs"
@@ -51,6 +52,8 @@ start_one() {
     cd "$workdir"
     nohup setsid "$@" >"$LOGS/$name.log" 2>&1 </dev/null &
     echo $! >"$PIDS/$name.pid"
+    process_identity "$(cat "$PIDS/$name.pid")" >"$PIDS/$name.identity"
+    printf '%q ' "$@" >"$PIDS/$name.command"
   )
   echo "Started $name PID=$(cat "$PIDS/$name.pid")"
 }
@@ -103,6 +106,7 @@ if find "$PIDS" -name '*.pid' -type f -print -quit | grep -q .; then
   exit 1
 fi
 
+trap 'failure=$?; trap - ERR INT TERM; "$ROOT/scripts/stop-all.sh" >&2; exit "$failure"' ERR INT TERM
 echo 'Applying F4 migrations...'
 (cd "$F4_DIR" && "$F4_PY" -m alembic -c alembic.ini upgrade head)
 
@@ -131,5 +135,5 @@ else
 fi
 
 echo 'All requested services are healthy.'
+trap - ERR INT TERM
 (( SKIP_FRONTEND == 1 )) || echo 'Open http://127.0.0.1:5177'
-

@@ -68,6 +68,8 @@ interface Dimension extends RadarDimension {
 }
 interface ResultFile { kind: string; name?: string; url?: string }
 interface Result {
+  artifactStatus?: Record<string, { status: string; reason?: string }>;
+  inputKind?: string;
   summary?: string;
   rubric: {
     standard?: string;
@@ -91,6 +93,11 @@ const versionId = ref("");
 const history = ref<Run[]>([]);
 const active = ref<Run | null>(null);
 const result = ref<Result | null>(null);
+async function retryArtifact(kind: string) {
+  if (!active.value) return;
+  try { result.value = (await api.post<Result>(`${base.value}/${active.value.id}/artifacts/${encodeURIComponent(kind)}/retry`)).data; }
+  catch { error.value = "产物重试失败，评分结果仍已保留。"; }
+}
 const busy = ref(false);
 const error = ref("");
 let timer: ReturnType<typeof setTimeout> | undefined;
@@ -349,6 +356,10 @@ onUnmounted(() => { disposed = true; clearTimer(); });
         </div>
       </section>
 
+      <p v-if="result?.inputKind">评审输入：{{ result.inputKind === 'STRUCTURED_VERSION_DOCX' ? '所选版本的结构化 Word' : '正文重建稿（不代表原稿版式）' }}</p>
+      <template v-for="(artifact, kind) in result?.artifactStatus || {}" :key="kind">
+        <p v-if="artifact.status === 'FAILED'" role="alert">{{ kind }} 导出失败：{{ artifact.reason }} <button type="button" @click="retryArtifact(String(kind))">重试此文件</button></p>
+      </template>
       <ResultDownloadPanel v-if="downloadFiles.length" :files="downloadFiles" description="本次智能评价结果已保存，可按需下载教师使用的结果文件。" />
     </template>
 

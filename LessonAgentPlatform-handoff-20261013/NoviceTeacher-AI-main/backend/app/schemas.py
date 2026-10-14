@@ -17,6 +17,8 @@ class CreateSession(BaseModel):
     request_key: UUID
     metadata: LessonMetadata
     content: str = Field(min_length=1, max_length=100000)
+    structured_content: dict | None = None
+    source_binding: dict | None = None
 
 
 class Decide(BaseModel):

@@ -46,6 +46,12 @@ class BaseAgent:
             taught = "已讲授" if state.current_material_taught else "尚未讲授"
             lines.append(f"当前材料: {m['title']}（{taught}）")
             lines.append(f"教学脚本: {m.get('teaching_script', '')}")
+            if m.get('metadata', {}).get('documentContext'):
+                lines.append(f"课程目标、准备和课后安排: {m['metadata']['documentContext']}")
+            if m.get("teacher_activity"):
+                lines.append(f"教师活动: {m['teacher_activity']}")
+            if m.get("duration_minutes") is not None:
+                lines.append(f"环节时长: {m['duration_minutes']} 分钟")
             if m.get("student_task"):
                 lines.append(f"学生任务与产出: {m['student_task']}")
             if m.get("evaluation_control"):

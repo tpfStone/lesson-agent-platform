@@ -41,14 +41,23 @@ public class PlatformAnnotationService {
     private final PlatformIssueIngestService issueIngest;
     private final RestClient f1;
     private final ObjectMapper mapper;
+    private final PlatformLessonDocumentService documents;
+    private final com.zone.lesoongen.auth.PlatformAccessService access;
+    private final org.springframework.transaction.support.TransactionTemplate transactions;
+    @Value("${app.scheduling-enabled:true}") private boolean schedulingEnabled;
 
     public PlatformAnnotationService(JdbcTemplate db, PlatformLessonService lessons,
             PlatformIssueIngestService issueIngest, ObjectMapper mapper,
+            PlatformLessonDocumentService documents, org.springframework.transaction.PlatformTransactionManager transactionManager,
+            com.zone.lesoongen.auth.PlatformAccessService access,
             @Value("${app.f1-base-url:http://127.0.0.1:8002}") String f1BaseUrl) {
         this.db = db;
         this.lessons = lessons;
         this.issueIngest = issueIngest;
         this.mapper = mapper;
+        this.documents = documents;
+        this.access = access;
+        this.transactions = new org.springframework.transaction.support.TransactionTemplate(transactionManager);
         // Match F2's working Python-engine transport. Avoid an h2c upgrade,
         // which can cause Uvicorn/httptools to discard the request body.
         SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
@@ -63,38 +72,93 @@ public class PlatformAnnotationService {
     public record BatchItemRef(String lessonId, String versionId) {}
 
     public AnnotationRun create(String lessonId, String versionId, boolean suggest) {
-        LessonDetail detail = lessons.detail(lessonId);
-        LessonVersion version = detail.versions().stream()
-                .filter(item -> item.id().equals(versionId)).findFirst()
+        return create(lessonId, versionId, suggest, null);
+    }
+
+    public AnnotationRun create(String lessonId, String versionId, boolean suggest, String requestKey) {
+        var detail = lessons.detail(lessonId);
+        var version = detail.versions().stream().filter(v -> v.id().equals(versionId)).findFirst()
                 .orElseThrow(() -> AppException.notFound("教案版本"));
-        byte[] payload;
+        String key = lessonId + ":" + (requestKey == null || requestKey.isBlank() ? versionId + ":" + suggest : requestKey);
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("lesson_id", lessonId); payload.put("version_id", versionId);
+        payload.put("subject", nonblank(detail.lesson().subject(), "未指定学科"));
+        payload.put("grade", nonblank(detail.lesson().grade(), "未指定年级"));
+        payload.put("topic", nonblank(detail.lesson().topic(), detail.lesson().title()));
+        payload.put("content", version.content()); payload.put("suggest", suggest); payload.put("request_key", key);
+        payload.put("source_structure_sha256", structureFingerprint(lessonId, versionId));
+        String fingerprint = PlatformLessonDocumentService.sha256(mapper.writeValueAsString(payload));
+        var previous = db.queryForList("SELECT id, request_fingerprint FROM platform_annotation_submission WHERE operation_key = ?", key);
+        String id;
+        if (!previous.isEmpty()) {
+            if (!fingerprint.equals(previous.get(0).get("request_fingerprint"))) throw new AppException(HttpStatus.CONFLICT, "F1_REQUEST_REUSED", "提交编号已用于不同评审内容");
+            id = (String) previous.get(0).get("id");
+        } else {
+            enrichInput(payload, lessonId, versionId);
+            String serialized = mapper.writeValueAsString(payload);
+            id = transactions.execute(status -> {
+                db.queryForObject("SELECT id FROM platform_lesson WHERE id = ? FOR UPDATE", String.class, lessonId);
+                var raced = db.queryForList("SELECT id, request_fingerprint FROM platform_annotation_submission WHERE operation_key = ?", key);
+                if (!raced.isEmpty()) {
+                    if (!fingerprint.equals(raced.get(0).get("request_fingerprint"))) throw new AppException(HttpStatus.CONFLICT, "F1_REQUEST_REUSED", "提交编号冲突");
+                    return (String) raced.get(0).get("id");
+                }
+                String createdId = Ulids.next(java.time.Clock.systemUTC());
+                Timestamp now = Timestamp.from(Instant.now());
+                db.update("INSERT INTO platform_annotation_submission (id, operation_key, lesson_id, version_id, request_fingerprint, request_json, state, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 'PENDING', ?, ?)",
+                        createdId, key, lessonId, versionId, fingerprint, serialized, now, now);
+                return createdId;
+            });
+        }
+        submitIntent(id);
+        return state(lessonId, id);
+    }
+
+    private void enrichInput(Map<String, Object> payload, String lessonId, String versionId) {
+        payload.put("input_kind", "TEXT_PROJECTION");
         try {
-            payload = mapper.writeValueAsBytes(Map.of("lesson_id", lessonId, "version_id", versionId,
-                    "subject", nonblank(detail.lesson().subject(), "未指定学科"),
-                    "grade", nonblank(detail.lesson().grade(), "未指定年级"),
-                    "topic", nonblank(detail.lesson().topic(), detail.lesson().title()), "content", version.content(),
-                    "suggest", suggest));
-        } catch (JacksonException error) {
-            throw new AppException(HttpStatus.INTERNAL_SERVER_ERROR, "F1_REQUEST_SERIALIZATION",
-                    "无法生成 F1 批注请求");
+            var snapshot = documents.get(lessonId, versionId);
+            if ("VERIFIED".equals(snapshot.bindingStatus())) {
+                byte[] bytes = LessonDocumentDocxExporter.export(snapshot.document());
+                payload.put("input_docx_base64", java.util.Base64.getEncoder().encodeToString(bytes));
+                payload.put("input_docx_sha256", java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256").digest(bytes)));
+                payload.put("input_kind", "STRUCTURED_VERSION_DOCX");
+            }
+        } catch (AppException error) {
+            if (!"LESSON_DOCUMENT_NOT_FOUND".equals(error.code())) throw error;
+        } catch (java.io.IOException | java.security.NoSuchAlgorithmException error) {
+            throw new AppException(HttpStatus.INTERNAL_SERVER_ERROR, "F1_INPUT_EXPORT_FAILED", "无法导出当前版本评审输入");
         }
-        log.info("F1 annotation request payloadBytes={}", payload.length);
+    }
+
+    private void submitIntent(String id) {
+        var intent = db.queryForMap("SELECT * FROM platform_annotation_submission WHERE id = ?", id);
+        if ("BOUND".equals(intent.get("state"))) return;
+        byte[] bytes = ((String) intent.get("request_json")).getBytes(java.nio.charset.StandardCharsets.UTF_8);
         Map<?, ?> accepted = request(() -> f1.post().uri("/internal/v1/runs/annotate")
-                .contentType(MediaType.APPLICATION_JSON)
-                .contentLength(payload.length)
-                .accept(MediaType.APPLICATION_JSON)
-                .body(payload)
-                .retrieve().body(Map.class));
-        Object nativeValue = accepted == null ? null : accepted.get("runId");
-        String nativeId = nativeValue instanceof String value ? value : "";
-        if (!nativeId.matches("[0-9a-f]{32}")) {
-            throw new AppException(HttpStatus.BAD_GATEWAY, "F1_INVALID_RESPONSE", "F1 返回的任务编号无效");
+                .contentType(MediaType.APPLICATION_JSON).contentLength(bytes.length).body(bytes).retrieve().body(Map.class));
+        String nativeId = String.valueOf(accepted.get("runId"));
+        if (!nativeId.matches("[0-9a-f]{32}")) throw new AppException(HttpStatus.BAD_GATEWAY, "F1_INVALID_RESPONSE", "F1 返回的任务编号无效");
+        transactions.executeWithoutResult(status -> {
+            db.queryForObject("SELECT id FROM platform_annotation_submission WHERE id = ? FOR UPDATE", String.class, id);
+            if (db.queryForObject("SELECT COUNT(*) FROM platform_annotation_run WHERE id = ?", Integer.class, id) == 0)
+                db.update("INSERT INTO platform_annotation_run (id, lesson_id, version_id, native_run_id, created_at) VALUES (?, ?, ?, ?, ?)",
+                        id, intent.get("lesson_id"), intent.get("version_id"), nativeId, intent.get("created_at"));
+            db.update("UPDATE platform_annotation_submission SET state = 'BOUND', last_error = NULL, updated_at = ? WHERE id = ?", Timestamp.from(Instant.now()), id);
+        });
+    }
+
+    @org.springframework.scheduling.annotation.Scheduled(fixedDelay = 30000)
+    public void reconcileSubmissions() {
+        if (!schedulingEnabled) return;
+        for (String id : db.query("SELECT id FROM platform_annotation_submission WHERE state = 'PENDING' ORDER BY created_at LIMIT 20", (rs, row) -> rs.getString(1))) {
+            try { submitIntent(id); }
+            catch (RuntimeException error) { db.update("UPDATE platform_annotation_submission SET last_error = ?, updated_at = ? WHERE id = ?", error.getClass().getSimpleName(), Timestamp.from(Instant.now()), id); }
         }
-        String id = Ulids.next(java.time.Clock.systemUTC());
-        Instant now = Instant.now();
-        db.update("INSERT INTO platform_annotation_run (id, lesson_id, version_id, native_run_id, created_at) VALUES (?, ?, ?, ?, ?)",
-                id, lessonId, versionId, nativeId, Timestamp.from(now));
-        return new AnnotationRun(id, lessonId, versionId, version.versionNumber(), nativeId, now, accepted);
+        for (String id : db.query("SELECT id FROM platform_annotation_batch_submission WHERE state = 'PENDING' ORDER BY created_at LIMIT 20", (rs, row) -> rs.getString(1))) {
+            try { submitBatchIntent(id); }
+            catch (RuntimeException error) { db.update("UPDATE platform_annotation_batch_submission SET last_error = ?, updated_at = ? WHERE id = ?", error.getClass().getSimpleName(), Timestamp.from(Instant.now()), id); }
+        }
     }
 
     private static String nonblank(String value, String fallback) {
@@ -103,6 +167,10 @@ public class PlatformAnnotationService {
 
 
     public Map<String, Object> createBatch(List<BatchItemRef> refs, boolean suggest) {
+        return createBatch(refs, suggest, null);
+    }
+
+    public Map<String, Object> createBatch(List<BatchItemRef> refs, boolean suggest, String requestKey) {
         if (refs == null || refs.size() < 2 || refs.size() > 20) {
             throw new AppException(HttpStatus.BAD_REQUEST, "F1_BATCH_SIZE",
                     "批量评审需要选择 2 到 20 个教案版本");
@@ -129,11 +197,50 @@ public class PlatformAnnotationService {
             item.put("topic", nonblank(detail.lesson().topic(), detail.lesson().title()));
             item.put("content", version.content());
             item.put("suggest", suggest);
+            item.put("source_structure_sha256", structureFingerprint(ref.lessonId(), ref.versionId()));
             items.add(item);
         }
 
-        byte[] payload = serialize(Map.of("items", items), "F1_BATCH_REQUEST_SERIALIZATION",
-                "无法生成 F1 批量评审请求");
+        String owner = access.currentUserId();
+        String fingerprint = PlatformLessonDocumentService.sha256(mapper.writeValueAsString(items));
+        String key = owner + ":batch:" + (requestKey == null || requestKey.isBlank() ? fingerprint : requestKey);
+        String id = PlatformLessonDocumentService.sha256(key).substring(0, 32);
+        var previous = db.queryForList("SELECT request_fingerprint FROM platform_annotation_batch_submission WHERE id = ?", id);
+        if (!previous.isEmpty() && !fingerprint.equals(previous.get(0).get("request_fingerprint")))
+            throw new AppException(HttpStatus.CONFLICT, "F1_BATCH_REQUEST_REUSED", "此批次编号已用于不同评审输入");
+        if (previous.isEmpty()) {
+            for (int index = 0; index < items.size(); index++) {
+                var item = items.get(index);
+                item.put("request_key", key + ":item:" + index);
+                enrichInput(item, refs.get(index).lessonId(), refs.get(index).versionId());
+            }
+            String serialized = mapper.writeValueAsString(Map.of("items", items, "request_key", key));
+            transactions.executeWithoutResult(status -> {
+                db.queryForObject("SELECT id FROM platform_user WHERE id = ? FOR UPDATE", String.class, owner);
+                var raced = db.queryForList("SELECT request_fingerprint FROM platform_annotation_batch_submission WHERE id = ?", id);
+                if (!raced.isEmpty()) {
+                    if (!fingerprint.equals(raced.get(0).get("request_fingerprint"))) throw new AppException(HttpStatus.CONFLICT,
+                            "F1_BATCH_REQUEST_REUSED", "批次编号冲突");
+                    return;
+                }
+                Timestamp now = Timestamp.from(Instant.now());
+                db.update("INSERT INTO platform_annotation_batch_submission (id, operation_key, owner_user_id, request_fingerprint, request_json, state, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'PENDING', ?, ?)",
+                        id, key, owner, fingerprint, serialized, now, now);
+                db.update("INSERT INTO platform_external_task_owner (task_type, task_id, owner_user_id, created_at) VALUES ('F1_BATCH', ?, ?, ?)", id, owner, now);
+            });
+        }
+        return submitBatchIntent(id);
+    }
+
+    private String structureFingerprint(String lessonId, String versionId) {
+        try { return documents.get(lessonId, versionId).structureSha256(); }
+        catch (AppException missing) { if ("LESSON_DOCUMENT_NOT_FOUND".equals(missing.code())) return "MISSING"; throw missing; }
+    }
+
+    private Map<String, Object> submitBatchIntent(String id) {
+        var intent = db.queryForMap("SELECT request_json, state FROM platform_annotation_batch_submission WHERE id = ?", id);
+        if ("BOUND".equals(intent.get("state"))) return batchState(id);
+        byte[] payload = ((String) intent.get("request_json")).getBytes(java.nio.charset.StandardCharsets.UTF_8);
         Map<?, ?> accepted = request(() -> f1.post().uri("/internal/v1/batches/annotate")
                 .contentType(MediaType.APPLICATION_JSON)
                 .contentLength(payload.length)
@@ -142,6 +249,8 @@ public class PlatformAnnotationService {
                 .retrieve().body(Map.class));
         Map<String, Object> out = copyMap(accepted);
         requireF1Id(out.get("batchId"), "batchId", "F1 返回的批量任务编号无效");
+        if (!id.equals(out.get("batchId"))) throw new AppException(HttpStatus.BAD_GATEWAY, "F1_BATCH_BINDING_MISMATCH", "F1 批次返回编号与提交意图不符");
+        db.update("UPDATE platform_annotation_batch_submission SET state = 'BOUND', last_error = NULL, updated_at = ? WHERE id = ?", Timestamp.from(Instant.now()), id);
         return out;
     }
 
@@ -253,7 +362,12 @@ public class PlatformAnnotationService {
                 SELECT id FROM platform_annotation_run
                 WHERE native_run_id = ? ORDER BY created_at DESC LIMIT 1
                 """, (rs, row) -> rs.getString("id"), nativeRunId);
-        if (!existing.isEmpty()) return existing.get(0);
+        if (!existing.isEmpty()) {
+            var bound = findById(existing.get(0));
+            if (!bound.lessonId().equals(lessonId) || !bound.versionId().equals(versionId))
+                throw new AppException(HttpStatus.CONFLICT, "F1_RUN_BINDING_CONFLICT", "F1 任务已绑定其他教案版本");
+            return existing.get(0);
+        }
 
         LessonDetail detail = lessons.detail(lessonId);
         boolean versionExists = detail.versions().stream().anyMatch(item -> item.id().equals(versionId));
@@ -340,6 +454,12 @@ public class PlatformAnnotationService {
                 .retrieve().body(Map.class));
         issueIngest.ingestF1(lessonId, run.versionId(), run.id(), run.nativeRunId(), result);
         return result;
+    }
+
+    public Map<?, ?> retryArtifact(String lessonId, String id, String kind) {
+        if (!ARTIFACTS.contains(kind)) throw AppException.notFound("批注文件");
+        var run = find(lessonId, id);
+        return request(() -> f1.post().uri("/internal/v1/runs/{id}/artifacts/{kind}/retry", run.nativeRunId(), kind).retrieve().body(Map.class));
     }
 
     public byte[] artifact(String lessonId, String id, String kind) {

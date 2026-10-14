@@ -1,0 +1,520 @@
+{
+  "blocks": [
+    {
+      "id": "b1",
+      "text": "小学数学《三角形的面积》教学设计",
+      "type": "paragraph",
+      "items": [],
+      "level": null,
+      "ordered": null,
+      "tableRows": [],
+      "teachingProcess": null
+    },
+    {
+      "id": "b2",
+      "text": "五年级上册 · 1课时 · 40分钟",
+      "type": "paragraph",
+      "items": [],
+      "level": null,
+      "ordered": null,
+      "tableRows": [],
+      "teachingProcess": null
+    },
+    {
+      "id": "b3",
+      "text": null,
+      "type": "table",
+      "items": [],
+      "level": null,
+      "ordered": null,
+      "tableRows": [
+        [
+          "测试设计说明：这份教案结构完整、可真实上课，同时保留少量可改进空间，便于测试智能评价、迭代修改、课堂推演和协同共析。"
+        ]
+      ],
+      "teachingProcess": null
+    },
+    {
+      "id": "b4",
+      "text": null,
+      "type": "table",
+      "items": [],
+      "level": null,
+      "ordered": null,
+      "tableRows": [
+        [
+          "学科",
+          "数学",
+          "年级",
+          "五年级"
+        ],
+        [
+          "课题",
+          "三角形的面积",
+          "课时",
+          "1课时（40分钟）"
+        ],
+        [
+          "教材版本",
+          "人教版小学数学五年级上册",
+          "课型",
+          "新授课"
+        ],
+        [
+          "班级规模",
+          "42人",
+          "授课方式",
+          "探究学习 + 小组合作"
+        ]
+      ],
+      "teachingProcess": null
+    },
+    {
+      "id": "b5",
+      "text": "一、教材与内容分析",
+      "type": "heading",
+      "items": [],
+      "level": 1,
+      "ordered": null,
+      "tableRows": [],
+      "teachingProcess": null
+    },
+    {
+      "id": "b6",
+      "text": "本课建立在学生已经掌握长方形、平行四边形面积计算，以及认识三角形底和高的基础上。核心任务是让学生经历“提出猜想—动手转化—发现关系—归纳公式—应用解释”的过程，理解三角形面积公式 S=ah÷2 的由来，而不是只记忆公式。",
+      "type": "paragraph",
+      "items": [],
+      "level": null,
+      "ordered": null,
+      "tableRows": [],
+      "teachingProcess": null
+    },
+    {
+      "id": "b7",
+      "text": "教学内容既包含面积公式的形成，也涉及等底等高、转化思想和空间观念。课堂将利用剪拼学具、方格纸和动态演示帮助学生把两个完全相同的三角形拼成平行四边形。",
+      "type": "paragraph",
+      "items": [],
+      "level": null,
+      "ordered": null,
+      "tableRows": [],
+      "teachingProcess": null
+    },
+    {
+      "id": "b8",
+      "text": "二、学情分析",
+      "type": "heading",
+      "items": [],
+      "level": 1,
+      "ordered": null,
+      "tableRows": [],
+      "teachingProcess": null
+    },
+    {
+      "id": "b9",
+      "text": "多数学生已经能计算平行四边形面积，并知道三角形的底和高，但对“为什么要除以2”容易停留在机械记忆层面。部分学生可能把三角形的任意边与任意高错误对应；少数学生在动手拼摆时可能只关注形状是否拼成，而忽略底、高与面积之间的数量关系。",
+      "type": "paragraph",
+      "items": [],
+      "level": null,
+      "ordered": null,
+      "tableRows": [],
+      "teachingProcess": null
+    },
+    {
+      "id": "b10",
+      "text": "班级内操作能力和语言表达能力差异较明显。课堂安排同伴互助，但对学习困难学生的分层材料与评价标准仍可进一步细化。",
+      "type": "paragraph",
+      "items": [],
+      "level": null,
+      "ordered": null,
+      "tableRows": [],
+      "teachingProcess": null
+    },
+    {
+      "id": "b11",
+      "text": "三、教学目标",
+      "type": "heading",
+      "items": [],
+      "level": 1,
+      "ordered": null,
+      "tableRows": [],
+      "teachingProcess": null
+    },
+    {
+      "id": "b12",
+      "text": "• 知识与技能：经历拼摆、观察和推理过程，能说出三角形面积公式，并能用公式正确计算常见三角形的面积。",
+      "type": "paragraph",
+      "items": [],
+      "level": null,
+      "ordered": null,
+      "tableRows": [],
+      "teachingProcess": null
+    },
+    {
+      "id": "b13",
+      "text": "• 过程与方法：借助“转化”的方法，把三角形面积问题转化为已学的平行四边形面积问题，尝试用图、式和语言解释“为什么除以2”。",
+      "type": "paragraph",
+      "items": [],
+      "level": null,
+      "ordered": null,
+      "tableRows": [],
+      "teachingProcess": null
+    },
+    {
+      "id": "b14",
+      "text": "• 核心素养：发展空间观念、推理意识和几何直观；在小组探究中倾听、表达并修正自己的想法。",
+      "type": "paragraph",
+      "items": [],
+      "level": null,
+      "ordered": null,
+      "tableRows": [],
+      "teachingProcess": null
+    },
+    {
+      "id": "b15",
+      "text": "• 学习品质：愿意用不同方法验证结论，并能对同伴的解释提出至少一个问题或补充。",
+      "type": "paragraph",
+      "items": [],
+      "level": null,
+      "ordered": null,
+      "tableRows": [],
+      "teachingProcess": null
+    },
+    {
+      "id": "b16",
+      "text": "四、教学重点与难点",
+      "type": "heading",
+      "items": [],
+      "level": 1,
+      "ordered": null,
+      "tableRows": [],
+      "teachingProcess": null
+    },
+    {
+      "id": "b17",
+      "text": "• 重点：理解并掌握三角形面积公式 S=ah÷2。",
+      "type": "paragraph",
+      "items": [],
+      "level": null,
+      "ordered": null,
+      "tableRows": [],
+      "teachingProcess": null
+    },
+    {
+      "id": "b18",
+      "text": "• 难点：建立三角形与拼成的平行四边形之间底、高、面积的对应关系，真正理解“÷2”的原因。",
+      "type": "paragraph",
+      "items": [],
+      "level": null,
+      "ordered": null,
+      "tableRows": [],
+      "teachingProcess": null
+    },
+    {
+      "id": "b19",
+      "text": "五、教学资源",
+      "type": "heading",
+      "items": [],
+      "level": 1,
+      "ordered": null,
+      "tableRows": [],
+      "teachingProcess": null
+    },
+    {
+      "id": "b20",
+      "text": "• 每组2个完全相同的三角形纸片、剪刀、方格纸、直尺。",
+      "type": "paragraph",
+      "items": [],
+      "level": null,
+      "ordered": null,
+      "tableRows": [],
+      "teachingProcess": null
+    },
+    {
+      "id": "b21",
+      "text": "• 教师课件：平行四边形面积回顾、三角形拼摆动画、生活情境图片。",
+      "type": "paragraph",
+      "items": [],
+      "level": null,
+      "ordered": null,
+      "tableRows": [],
+      "teachingProcess": null
+    },
+    {
+      "id": "b22",
+      "text": "• 板书工具：磁性三角形、面积公式卡片。",
+      "type": "paragraph",
+      "items": [],
+      "level": null,
+      "ordered": null,
+      "tableRows": [],
+      "teachingProcess": null
+    },
+    {
+      "id": "b23",
+      "text": "六、教学过程",
+      "type": "heading",
+      "items": [],
+      "level": 1,
+      "ordered": null,
+      "tableRows": [],
+      "teachingProcess": null
+    },
+    {
+      "id": "b24",
+      "text": null,
+      "type": "teaching_process",
+      "items": [],
+      "level": null,
+      "ordered": null,
+      "tableRows": [
+        [
+          "环节与时间",
+          "教师活动",
+          "学生活动 / 可能反应",
+          "评价与证据"
+        ],
+        [
+          "1. 情境导入\n5分钟",
+          "出示学校花坛中一块三角形区域：“如果要铺草坪，至少需要多少平方米草皮？”追问：已经会算哪些图形的面积？这个三角形能不能转化成会算的图形？",
+          "回忆长方形、平行四边形面积；提出“拼成长方形/平行四边形”“数方格”等猜想。",
+          "观察是否能调动旧知；随机请2名学生说明自己的猜想。"
+        ],
+        [
+          "2. 小组探究\n12分钟",
+          "每组发两个完全相同的三角形，要求：①拼成一种已学图形；②记录拼成图形的底和高与原三角形的关系；③写出面积之间的关系。巡视并追问“为什么必须是两个完全相同的三角形？”",
+          "合作拼摆。预期出现：拼成平行四边形；少数组可能拼成长方形或较特殊图形。记录“平行四边形面积 = 底×高”“一个三角形面积是平行四边形的一半”。",
+          "教师观察单：是否正确配对底和高；是否能说出面积倍数关系。"
+        ],
+        [
+          "3. 汇报归纳\n8分钟",
+          "邀请2组展示不同三角形的拼摆结果。用动态动画展示任意三角形都可由两个全等三角形拼成平行四边形。板书：平行四边形面积=底×高；三角形面积=底×高÷2。追问：“÷2”从哪里来？",
+          "用自己的话解释：两个完全相同的三角形组成一个平行四边形，所以一个三角形面积是其一半。部分学生可能回答“公式规定要除2”，教师继续追问证据。",
+          "重点听学生是否能用“两个全等三角形”“同底同高”“面积一半”解释。"
+        ],
+        [
+          "4. 练习应用\n9分钟",
+          "基础题：底8cm、高5cm。变式题：给出三角形三条边和两条高，要求选择对应底和高。辨析题：有人算成8×5=40cm²，错在哪里？",
+          "独立完成后同桌互评。预期能得到20cm²；变式题中部分学生会出现底高错配。",
+          "即时统计三类错误：忘记÷2、底高不对应、单位错误。"
+        ],
+        [
+          "5. 开放挑战\n4分钟",
+          "给出“面积都是12cm²的三角形”，让学生设计一组可能的底和高，并说说能不能有很多种答案。",
+          "尝试给出如底6高4、底8高3等；讨论面积相同但形状可能不同。",
+          "评价学生是否能逆向使用公式并解释多解。"
+        ],
+        [
+          "6. 总结与作业\n2分钟",
+          "请学生完成句式：“今天我真正明白了……；我还不确定的是……”。布置作业。",
+          "口头或便签完成反思。",
+          "收集退出条，作为下一课调整依据。"
+        ]
+      ],
+      "teachingProcess": {
+        "rows": [
+          {
+            "title": "情境导入",
+            "evaluation": "观察是否能调动旧知；随机请2名学生说明自己的猜想。",
+            "extraCells": [],
+            "sourceRowIndex": 1,
+            "durationMinutes": 5,
+            "studentActivity": "回忆长方形、平行四边形面积；提出“拼成长方形/平行四边形”“数方格”等猜想。",
+            "teacherActivity": "出示学校花坛中一块三角形区域：“如果要铺草坪，至少需要多少平方米草皮？”追问：已经会算哪些图形的面积？这个三角形能不能转化成会算的图形？"
+          },
+          {
+            "title": "小组探究",
+            "evaluation": "教师观察单：是否正确配对底和高；是否能说出面积倍数关系。",
+            "extraCells": [],
+            "sourceRowIndex": 2,
+            "durationMinutes": 12,
+            "studentActivity": "合作拼摆。预期出现：拼成平行四边形；少数组可能拼成长方形或较特殊图形。记录“平行四边形面积 = 底×高”“一个三角形面积是平行四边形的一半”。",
+            "teacherActivity": "每组发两个完全相同的三角形，要求：①拼成一种已学图形；②记录拼成图形的底和高与原三角形的关系；③写出面积之间的关系。巡视并追问“为什么必须是两个完全相同的三角形？”"
+          },
+          {
+            "title": "汇报归纳",
+            "evaluation": "重点听学生是否能用“两个全等三角形”“同底同高”“面积一半”解释。",
+            "extraCells": [],
+            "sourceRowIndex": 3,
+            "durationMinutes": 8,
+            "studentActivity": "用自己的话解释：两个完全相同的三角形组成一个平行四边形，所以一个三角形面积是其一半。部分学生可能回答“公式规定要除2”，教师继续追问证据。",
+            "teacherActivity": "邀请2组展示不同三角形的拼摆结果。用动态动画展示任意三角形都可由两个全等三角形拼成平行四边形。板书：平行四边形面积=底×高；三角形面积=底×高÷2。追问：“÷2”从哪里来？"
+          },
+          {
+            "title": "练习应用",
+            "evaluation": "即时统计三类错误：忘记÷2、底高不对应、单位错误。",
+            "extraCells": [],
+            "sourceRowIndex": 4,
+            "durationMinutes": 9,
+            "studentActivity": "独立完成后同桌互评。预期能得到20cm²；变式题中部分学生会出现底高错配。",
+            "teacherActivity": "基础题：底8cm、高5cm。变式题：给出三角形三条边和两条高，要求选择对应底和高。辨析题：有人算成8×5=40cm²，错在哪里？"
+          },
+          {
+            "title": "开放挑战",
+            "evaluation": "评价学生是否能逆向使用公式并解释多解。",
+            "extraCells": [],
+            "sourceRowIndex": 5,
+            "durationMinutes": 4,
+            "studentActivity": "尝试给出如底6高4、底8高3等；讨论面积相同但形状可能不同。",
+            "teacherActivity": "给出“面积都是12cm²的三角形”，让学生设计一组可能的底和高，并说说能不能有很多种答案。"
+          },
+          {
+            "title": "总结与作业",
+            "evaluation": "收集退出条，作为下一课调整依据。",
+            "extraCells": [],
+            "sourceRowIndex": 6,
+            "durationMinutes": 2,
+            "studentActivity": "口头或便签完成反思。",
+            "teacherActivity": "请学生完成句式：“今天我真正明白了……；我还不确定的是……”。布置作业。"
+          }
+        ],
+        "columns": [
+          "环节与时间",
+          "教师活动",
+          "学生活动 / 可能反应",
+          "评价与证据"
+        ]
+      }
+    },
+    {
+      "id": "b25",
+      "text": "七、形成性评价设计",
+      "type": "heading",
+      "items": [],
+      "level": 1,
+      "ordered": null,
+      "tableRows": [],
+      "teachingProcess": null
+    },
+    {
+      "id": "b26",
+      "text": "• 过程证据：小组拼摆记录单、学生口头解释、练习错误类型、课堂退出条。",
+      "type": "paragraph",
+      "items": [],
+      "level": null,
+      "ordered": null,
+      "tableRows": [],
+      "teachingProcess": null
+    },
+    {
+      "id": "b27",
+      "text": "• 核心评价问题：学生能否解释“为什么除以2”，而不仅仅是算对。",
+      "type": "paragraph",
+      "items": [],
+      "level": null,
+      "ordered": null,
+      "tableRows": [],
+      "teachingProcess": null
+    },
+    {
+      "id": "b28",
+      "text": "• 评价标准暂采用“能正确计算 / 能解释转化关系 / 能处理变式”三个观察点；不同层次学生的具体达标阈值可进一步明确。",
+      "type": "paragraph",
+      "items": [],
+      "level": null,
+      "ordered": null,
+      "tableRows": [],
+      "teachingProcess": null
+    },
+    {
+      "id": "b29",
+      "text": "八、作业设计",
+      "type": "heading",
+      "items": [],
+      "level": 1,
+      "ordered": null,
+      "tableRows": [],
+      "teachingProcess": null
+    },
+    {
+      "id": "b30",
+      "text": "• 基础：完成教材中2道三角形面积计算题，并写出完整计算过程。",
+      "type": "paragraph",
+      "items": [],
+      "level": null,
+      "ordered": null,
+      "tableRows": [],
+      "teachingProcess": null
+    },
+    {
+      "id": "b31",
+      "text": "• 应用：测量家中或校园里一个近似三角形物体的底和高，估算面积。",
+      "type": "paragraph",
+      "items": [],
+      "level": null,
+      "ordered": null,
+      "tableRows": [],
+      "teachingProcess": null
+    },
+    {
+      "id": "b32",
+      "text": "• 拓展：画两个面积相同但形状明显不同的三角形，说明你怎样保证它们面积相同。",
+      "type": "paragraph",
+      "items": [],
+      "level": null,
+      "ordered": null,
+      "tableRows": [],
+      "teachingProcess": null
+    },
+    {
+      "id": "b33",
+      "text": "九、板书设计",
+      "type": "heading",
+      "items": [],
+      "level": 1,
+      "ordered": null,
+      "tableRows": [],
+      "teachingProcess": null
+    },
+    {
+      "id": "b34",
+      "text": "三角形的面积\n\n两个完全相同的三角形 → 拼成平行四边形\n平行四边形面积 = 底 × 高\n三角形面积 = 底 × 高 ÷ 2\nS = ah ÷ 2\n\n关键：底和高必须对应；“÷2”来自面积的一半。",
+      "type": "paragraph",
+      "items": [],
+      "level": null,
+      "ordered": null,
+      "tableRows": [],
+      "teachingProcess": null
+    },
+    {
+      "id": "b35",
+      "text": "十、教学后反思预设",
+      "type": "heading",
+      "items": [],
+      "level": 1,
+      "ordered": null,
+      "tableRows": [],
+      "teachingProcess": null
+    },
+    {
+      "id": "b36",
+      "text": "• 重点观察学生是否真正建立“转化前后底、高不变，面积关系变为一半”的联系。",
+      "type": "paragraph",
+      "items": [],
+      "level": null,
+      "ordered": null,
+      "tableRows": [],
+      "teachingProcess": null
+    },
+    {
+      "id": "b37",
+      "text": "• 如果变式题中底高错配较多，下一课需增加“同一三角形不同底对应不同高”的可视化练习。",
+      "type": "paragraph",
+      "items": [],
+      "level": null,
+      "ordered": null,
+      "tableRows": [],
+      "teachingProcess": null
+    },
+    {
+      "id": "b38",
+      "text": "• 小组合作中可能出现少数学生操作、其他学生旁观的情况，后续可增加明确角色分工。",
+      "type": "paragraph",
+      "items": [],
+      "level": null,
+      "ordered": null,
+      "tableRows": [],
+      "teachingProcess": null
+    }
+  ],
+  "schemaVersion": "1.0"
+}

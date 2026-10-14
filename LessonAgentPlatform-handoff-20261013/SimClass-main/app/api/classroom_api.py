@@ -73,11 +73,18 @@ def _bad_request(exc: Exception) -> HTTPException:
 @app.get("/api/health")
 @app.get("/health")
 def health():
+    import os
+    explicit_mock = os.getenv('F3_MODEL_MODE', '').strip().upper() == 'MOCK'
+    configured = bool(os.getenv('API_KEY', '').strip())
     return {
         "status": "up",
         "service": "F3 Complete Classroom Simulation API",
         "version": "3.0",
         "port": 8003,
+        "provider": "mock" if explicit_mock else "real",
+        "model_configured": explicit_mock or configured,
+        "real_model_ready": configured,
+        "ready": explicit_mock or configured,
     }
 
 
@@ -86,7 +93,7 @@ def create_session(request: CreateSessionRequest, response: Response):
     try:
         snapshot, idempotent = service.create_session(request)
     except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        raise HTTPException(status_code=409 if 'REQUEST_KEY_CONFLICT' in str(exc) else 422, detail=str(exc)) from exc
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     if idempotent:
@@ -100,6 +107,19 @@ def get_session(session_id: str):
         return service.get_session(session_id)
     except KeyError as exc:
         raise _not_found(session_id) from exc
+
+
+@app.get("/api/classroom/requests/{request_key}")
+def session_for_request(request_key: str):
+    try:
+        return service.session_for_request(request_key)
+    except KeyError as exc:
+        raise HTTPException(404, 'No session found for request key') from exc
+
+
+@app.post("/api/classroom/requests/{request_key}/cancel-if-absent")
+def cancel_request_if_absent(request_key: str):
+    return service.cancel_request_if_absent(request_key)
 
 
 @app.get("/api/classroom/sessions/{session_id}/events")

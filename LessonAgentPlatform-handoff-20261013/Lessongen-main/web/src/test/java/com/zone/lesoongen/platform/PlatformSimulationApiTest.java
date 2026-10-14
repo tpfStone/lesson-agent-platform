@@ -43,6 +43,7 @@ class PlatformSimulationApiTest {
     @Autowired PlatformLessonService lessons;
     @Autowired JdbcTemplate db;
     @Autowired ObjectMapper mapper;
+    @Autowired PlatformSimulationService simulations;
 
     private MockMvc mvc;
     private String lessonId;
@@ -90,6 +91,25 @@ class PlatformSimulationApiTest {
                 .andExpect(jsonPath("$.versionId").value(versionId))
                 .andExpect(jsonPath("$.completedRounds").value(4))
                 .andExpect(jsonPath("$.alreadySaved").value(false));
+    }
+
+    @Test void analysisCanBeAppendedWithoutChangingExecution() {
+        var session = new LinkedHashMap<String,Object>();
+        session.put("sessionId", UUID.randomUUID().toString()); session.put("lessonId", lessonId); session.put("versionId", versionId);
+        session.put("status", "INTERRUPTED"); session.put("stopReason", "SERVICE_RESTART_UNRECOVERABLE"); session.put("modelMode", "MOCK");
+        session.put("startedAt", "2026-10-14T00:00:00Z"); session.put("finishedAt", "2026-10-14T00:01:00Z");
+        session.put("materials", List.of(Map.of("materialId", "r", "title", "导入", "teachingScript", "提问")));
+        var record = new LinkedHashMap<String,Object>(); record.put("schemaVersion", "2.1"); record.put("session", session);
+        record.put("events", List.of()); record.put("analysisStatus", "FAILED");
+        var first = simulations.save(lessonId, new PlatformSimulationController.SaveSimulationRequest(record, "课堂记录"));
+        record.put("analysisStatus", "COMPLETED"); record.put("analysisRevision", 1); record.put("issues", List.of());
+        assertTrue(simulations.save(lessonId, new PlatformSimulationController.SaveSimulationRequest(record, "补分析")).alreadySaved());
+        simulations.save(lessonId, new PlatformSimulationController.SaveSimulationRequest(record, "补分析"));
+        assertEquals(1, db.queryForObject("SELECT COUNT(*) FROM platform_simulation_analysis WHERE simulation_run_id = ?", Integer.class, first.simulationRunId()));
+        assertTrue(simulations.jsonArtifact(lessonId, first.simulationRunId()).contains("COMPLETED"));
+        session.put("stopReason", "MANUAL_END");
+        org.junit.jupiter.api.Assertions.assertThrows(com.zone.lesoongen.application.AppException.class,
+                () -> simulations.save(lessonId, new PlatformSimulationController.SaveSimulationRequest(record, "不能修改执行事实")));
     }
 
     @Test

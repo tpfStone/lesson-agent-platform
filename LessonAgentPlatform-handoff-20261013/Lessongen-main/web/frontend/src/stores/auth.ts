@@ -3,7 +3,9 @@ import { defineStore } from "pinia";
 import { computed, ref } from "vue";
 import { useDraftStore } from "./draft";
 import { useWorkflowStore } from "./workflow";
+import { useJobStore } from "./jobs";
 import { clearCsrfToken, setCsrfToken } from "../api/csrf";
+import { invalidatePrivateContext } from "../api/privateContext";
 
 export interface AuthUser {
   id: string;
@@ -17,6 +19,7 @@ export const useAuthStore = defineStore("auth", () => {
   const user = ref<AuthUser | null>(null);
   const initialized = ref(false);
   const loading = ref(false);
+  let authGeneration = 0;
 
   function adoptUser(next: AuthUser) {
     const previous = window.localStorage.getItem("platform-auth-user-id");
@@ -31,8 +34,9 @@ export const useAuthStore = defineStore("auth", () => {
   token: string;
 }
 
-async function prepareCsrf() {
+async function prepareCsrf(generation = authGeneration) {
   const response = await axios.get<CsrfResponse>("/api/auth/csrf");
+  if (generation !== authGeneration) return;
 
   setCsrfToken(
     response.data.headerName,
@@ -45,24 +49,35 @@ async function prepareCsrf() {
 
   async function restore() {
     if (initialized.value) return;
+    const generation = ++authGeneration;
     try {
-      await prepareCsrf();
-      adoptUser((await axios.get<AuthUser>("/api/auth/me")).data);
+      await prepareCsrf(generation);
+      if (generation !== authGeneration) return;
+      const next = (await axios.get<AuthUser>("/api/auth/me")).data;
+      if (generation === authGeneration) adoptUser(next);
     } catch {
-      user.value = null;
+      if (generation === authGeneration) {
+        user.value = null;
+        clearPrivateClientState();
+      }
     } finally {
-      initialized.value = true;
+      if (generation === authGeneration) initialized.value = true;
     }
   }
 
   async function login(username: string, password: string) {
+    const generation = ++authGeneration;
     loading.value = true;
     try {
-      adoptUser((await axios.post<AuthUser>("/api/auth/login", { username, password })).data);
-      await prepareCsrf();
+      const next = (await axios.post<AuthUser>("/api/auth/login", { username, password })).data;
+      if (generation !== authGeneration) return;
+      adoptUser(next);
+      await prepareCsrf(generation);
     } finally {
-      loading.value = false;
-      initialized.value = true;
+      if (generation === authGeneration) {
+        loading.value = false;
+        initialized.value = true;
+      }
     }
   }
 
@@ -77,9 +92,11 @@ async function prepareCsrf() {
   }
 
   async function logout() {
+    const generation = ++authGeneration;
     try {
       await axios.post("/api/auth/logout");
     } finally {
+      if (generation !== authGeneration) return;
       clearCsrfToken();
       delete axios.defaults.headers.common["X-XSRF-TOKEN"];
       user.value = null;
@@ -90,8 +107,9 @@ async function prepareCsrf() {
   }
 
   async function updateProfile(displayName: string) {
+    const generation = authGeneration;
     const next = (await axios.patch<AuthUser>("/api/auth/me", { displayName })).data;
-    adoptUser(next);
+    if (generation === authGeneration) adoptUser(next);
   }
 
   async function changePassword(currentPassword: string, newPassword: string) {
@@ -113,6 +131,7 @@ async function prepareCsrf() {
 });
 
 function clearPrivateClientState() {
+  invalidatePrivateContext();
   const privatePrefixes = [
     "platform-active-workflow-", "platform-custom-workflows-",
     "platform-selected-workflow-", "platform-generated-lesson-",
@@ -134,4 +153,5 @@ function clearPrivateClientState() {
   // logout/login in the same tab cannot expose the previous account's local state.
   useWorkflowStore().$reset();
   useDraftStore().$reset();
+  useJobStore().resetPrivate();
 }

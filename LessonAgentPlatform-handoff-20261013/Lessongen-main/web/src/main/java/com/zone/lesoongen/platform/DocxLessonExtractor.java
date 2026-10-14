@@ -95,7 +95,7 @@ public class DocxLessonExtractor {
                         pendingOrdered = null;
                     }
                     Integer headingLevel = headingLevel(paragraph, text);
-                    blocks.add(new Block("b" + nextId++, headingLevel == null ? "paragraph" : "heading",
+                    blocks.add(new Block(newBlockId(), headingLevel == null ? "paragraph" : "heading",
                             headingLevel, text, null, List.of(), List.of(), null));
                 } else if (element instanceof XWPFTable table) {
                     if (!pendingList.isEmpty()) {
@@ -103,7 +103,12 @@ public class DocxLessonExtractor {
                         pendingList.clear();
                         pendingOrdered = null;
                     }
-                    blocks.add(LessonDocumentSupport.tableBlock("b" + nextId++, tableRows(table)));
+                    blocks.add(LessonDocumentSupport.tableBlock(newBlockId(), tableRows(table)));
+                } else if (element instanceof org.apache.poi.xwpf.usermodel.XWPFSDT control) {
+                    blocks.add(new Block(newBlockId(), "paragraph", null, normalize(control.getContent().getText()), null, List.of(), List.of(), null));
+                    warnings.add("内容控件已提取为文字；控件交互和版式未保留。");
+                } else {
+                    warnings.add("存在未支持的正文对象；请核对保留的 DOCX 原稿。");
                 }
             }
             if (!pendingList.isEmpty()) blocks.add(listBlock(nextId, pendingOrdered, pendingList));
@@ -111,6 +116,12 @@ public class DocxLessonExtractor {
             if (!document.getAllPictures().isEmpty()) {
                 warnings.add("检测到图片；当前只提取可读取文字，不执行 OCR。");
             }
+            String xml = document.getDocument().xmlText();
+            if (xml.contains("gridSpan") || xml.contains("vMerge")) warnings.add("检测到合并单元格；保留可读取内容，合并版式需核对原稿。");
+            if (xml.contains("txbxContent")) warnings.add("检测到文本框；当前不能保证文本框内容完整，请核对原稿。");
+            if (!document.getHeaderList().isEmpty() || !document.getFooterList().isEmpty()) warnings.add("页眉页脚未纳入教案正文，请在原稿中查看。");
+            if (document.getTables().stream().flatMap(t -> t.getRows().stream()).flatMap(r -> r.getTableCells().stream())
+                    .anyMatch(c -> !c.getTables().isEmpty())) warnings.add("嵌套表格已展开为单元格文字；嵌套版式未保留。");
         } catch (AppException error) {
             throw error;
         } catch (Exception error) {
@@ -118,7 +129,7 @@ public class DocxLessonExtractor {
                     "Word 文件损坏或无法解析，请重新导出为标准 .docx 后再试");
         }
 
-        String content = LessonDocumentSupport.renderText(structured);
+        String content = LessonDocumentProjection.project(structured).content();
         if (content.isBlank()) {
             throw new AppException(HttpStatus.UNPROCESSABLE_ENTITY, "DOCX_EMPTY_CONTENT",
                     "未从 Word 文件中读取到正文；仅图片或空白文档暂不支持");
@@ -193,26 +204,29 @@ public class DocxLessonExtractor {
         for (XWPFTableRow row : table.getRows()) {
             List<String> cells = new ArrayList<>();
             for (XWPFTableCell cell : row.getTableCells()) {
-                List<String> paragraphs = cell.getParagraphs().stream()
-                        .map(XWPFParagraph::getText)
-                        .map(DocxLessonExtractor::normalize)
-                        .filter(text -> !text.isBlank())
-                        .toList();
-                String cellText = String.join(" / ", paragraphs);
+                List<String> paragraphs = new ArrayList<>();
+                for (var element : cell.getBodyElements()) {
+                    if (element instanceof XWPFParagraph paragraph) paragraphs.add(normalize(paragraph.getText()));
+                    else if (element instanceof XWPFTable nested) paragraphs.add(String.join("\n", tableRows(nested).stream()
+                            .map(cellsInRow -> String.join(" | ", cellsInRow)).toList()));
+                }
+                String cellText = String.join("\n", paragraphs).strip();
                 if (cellText.isBlank()) {
                     cellText = normalize(cell.getText());
                 }
                 cells.add(cellText);
             }
-            if (cells.stream().anyMatch(text -> !text.isBlank())) rows.add(List.copyOf(cells));
+            rows.add(List.copyOf(cells));
         }
         return List.copyOf(rows);
     }
 
     private static Block listBlock(int id, Boolean ordered, List<String> items) {
-        return new Block("b" + id, "list", null, null, Boolean.TRUE.equals(ordered),
+        return new Block(newBlockId(), "list", null, null, Boolean.TRUE.equals(ordered),
                 List.copyOf(items), List.of(), null);
     }
+
+    private static String newBlockId() { return "b-" + java.util.UUID.randomUUID(); }
 
     /** null means regular paragraph; false/true mean unordered/ordered list. */
     private static Boolean listKind(XWPFParagraph paragraph) {

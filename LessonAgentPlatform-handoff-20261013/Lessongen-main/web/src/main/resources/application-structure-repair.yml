@@ -1,0 +1,12 @@
+# Run only against an already migrated, backed-up database. Inspection does not apply migrations.
+app:
+  scheduling-enabled: false
+platform:
+  structure-backfill:
+    enabled: false
+spring:
+  flyway:
+    enabled: false
+server:
+  address: 127.0.0.1
+  port: 0

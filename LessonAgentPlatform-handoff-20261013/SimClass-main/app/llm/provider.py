@@ -30,7 +30,8 @@ class OpenAICompatProvider(BaseLLMProvider):
             "temperature": temperature,
         }
         try:
-            resp = requests.post(url, headers=headers, json=payload, timeout=120)
+            resp = requests.post(url, headers=headers, json=payload,
+                                 timeout=(5, float(os.getenv('F3_MODEL_TIMEOUT_SECONDS', '60'))))
             resp.raise_for_status()
             data = resp.json()
             return data["choices"][0]["message"]["content"]

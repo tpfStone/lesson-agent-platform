@@ -27,6 +27,8 @@ Lessongen-main/web/.mvn/wrapper/dists/
 **/dist/
 **/.vite/
 **/coverage/
+**/test-results/
+**/playwright-report/
 
 # Runtime data, logs and process files
 .runtime/

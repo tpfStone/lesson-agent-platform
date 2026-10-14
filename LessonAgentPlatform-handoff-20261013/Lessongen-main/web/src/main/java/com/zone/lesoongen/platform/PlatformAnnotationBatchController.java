@@ -36,7 +36,7 @@ public class PlatformAnnotationBatchController {
 
     public record StartBatch(
             @Valid @Size(min = 2, max = 20) List<VersionRef> items,
-            boolean suggest) {}
+            boolean suggest, @Size(max = 128) String requestKey) {}
 
     public record StartComparison(
             @Size(min = 2, max = 20) List<@NotBlank String> annotationIds) {}
@@ -48,8 +48,7 @@ public class PlatformAnnotationBatchController {
                         input.items().stream()
                                 .map(item -> new BatchItemRef(item.lessonId(), item.versionId()))
                                 .toList(),
-                        input.suggest());
-        access.registerExternalTask("F1_BATCH", String.valueOf(result.get("batchId")));
+                        input.suggest(), input.requestKey());
         return ResponseEntity.status(HttpStatus.ACCEPTED).body(result);
     }
 

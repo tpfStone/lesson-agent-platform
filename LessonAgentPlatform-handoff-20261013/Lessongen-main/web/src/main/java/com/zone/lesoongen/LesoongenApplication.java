@@ -7,7 +7,8 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 public class LesoongenApplication {
 
     public static void main(String[] args) {
-        SpringApplication.run(LesoongenApplication.class, args);
+        var context = SpringApplication.run(LesoongenApplication.class, args);
+        if (context.getEnvironment().matchesProfiles("structure-repair")) context.close();
     }
 
 

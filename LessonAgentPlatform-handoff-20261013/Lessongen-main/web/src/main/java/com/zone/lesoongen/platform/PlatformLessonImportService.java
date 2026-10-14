@@ -41,9 +41,11 @@ public class PlatformLessonImportService {
     private final AppProperties properties;
     private final JdbcTemplate db;
     private final Clock clock;
+    private final org.springframework.transaction.support.TransactionTemplate transactions;
 
     public PlatformLessonImportService(PlatformLessonService lessons, DocxLessonExtractor extractor,
-            StoragePort storage, AppProperties properties, JdbcTemplate db, Clock clock) {
+            StoragePort storage, AppProperties properties, JdbcTemplate db, Clock clock, org.springframework.transaction.PlatformTransactionManager transactionManager) {
+        this.transactions = new org.springframework.transaction.support.TransactionTemplate(transactionManager);
         this.lessons = lessons;
         this.extractor = extractor;
         this.storage = storage;
@@ -59,7 +61,6 @@ public class PlatformLessonImportService {
                 extracted.structuredContent(), extracted.warnings());
     }
 
-    @Transactional
     public LessonDetail importDocx(MultipartFile file, CreateLesson request) {
         // Re-parse at confirmation time: preview is intentionally stateless and cannot be trusted as persistence input.
         ExtractedDocument extracted = extractor.extract(file, properties.maxUploadBytes());
@@ -77,11 +78,9 @@ public class PlatformLessonImportService {
             parseStatus = "EDITED_FALLBACK";
             structureWarnings.add("确认保存前正文已被编辑，结构已按确认后的正文重新生成；原始 DOCX 仍单独保留。");
         }
-        LessonDetail created = lessons.createDocx(normalized, document, parseStatus,
-                List.copyOf(structureWarnings));
-        String lessonId = created.lesson().id();
-        String versionId = created.lesson().currentVersionId();
-        String storageKey = "lessons/" + lessonId + "/source/original.docx";
+        final String quality = parseStatus;
+        // Stage and validate original bytes before opening the version/head transaction.
+        String storageKey = "imports/" + java.util.UUID.randomUUID() + "/original.docx";
         StoredObject stored;
         try (InputStream stream = file.getInputStream()) {
             stored = storage.store(storageKey, stream, properties.maxUploadBytes());
@@ -89,8 +88,12 @@ public class PlatformLessonImportService {
             throw new AppException(HttpStatus.INTERNAL_SERVER_ERROR, "FILE_STORAGE_FAILED",
                     "无法安全保存上传的 Word 原稿");
         }
+        try {
+        return transactions.execute(status -> {
         registerRollbackCleanup(storageKey);
-
+        LessonDetail created = lessons.createDocx(normalized, document, quality, List.copyOf(structureWarnings));
+        String lessonId = created.lesson().id();
+        String versionId = created.lesson().currentVersionId();
         Instant now = clock.instant().truncatedTo(ChronoUnit.MICROS);
         String contentType = normalizedContentType(file.getContentType());
         int changed = db.update("""
@@ -103,7 +106,14 @@ public class PlatformLessonImportService {
         if (changed != 1) {
             throw new IllegalStateException("source document metadata insert did not create one row");
         }
+        db.update("UPDATE platform_lesson_version_structure SET source_artifact_id = ?, source_artifact_sha256 = ? WHERE version_id = ?",
+                stored.storageKey(), stored.sha256(), versionId);
         return lessons.detail(lessonId);
+        });
+        } catch (RuntimeException failure) {
+            try { storage.delete(storageKey); } catch (IOException cleanup) { failure.addSuppressed(cleanup); }
+            throw failure;
+        }
     }
 
     public SourceDocumentMetadata sourceDocument(String lessonId) {

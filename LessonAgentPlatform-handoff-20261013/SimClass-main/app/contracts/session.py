@@ -52,6 +52,11 @@ class MaterialInput(BaseModel):
         serialization_alias="sourceSectionId",
     )
     metadata: dict[str, Any] = Field(default_factory=dict)
+    duration_minutes: int | None = Field(default=None, alias="durationMinutes", ge=0)
+    teacher_activity: str = Field(default="", alias="teacherActivity")
+    student_activity: str = Field(default="", validation_alias=AliasChoices("studentActivity", "student_activity", "student_task"), serialization_alias="studentActivity")
+    evaluation: str = Field(default="", validation_alias=AliasChoices("evaluation", "evaluation_control"))
+    source_ref: dict[str, Any] = Field(default_factory=dict, alias="sourceRef")
 
     def to_classroom_material(self) -> dict[str, Any]:
         # Keep legacy keys because BaseAgent/ClassState read them directly.
@@ -65,6 +70,11 @@ class MaterialInput(BaseModel):
             "keyPoints": list(self.key_points),
             "sourceSectionId": self.source_section_id,
             "metadata": dict(self.metadata),
+            "duration_minutes": self.duration_minutes,
+            "teacher_activity": self.teacher_activity,
+            "student_task": self.student_activity,
+            "evaluation_control": self.evaluation,
+            "sourceRef": dict(self.source_ref),
         }
 
 

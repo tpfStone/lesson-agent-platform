@@ -235,8 +235,8 @@ public class PlatformIssueIngestService {
                 .stream().findFirst().orElse(null);
 
         if (existing != null) {
-            db.update("UPDATE platform_issue SET status = ?, updated_at = ? WHERE id = ?",
-                    status, Timestamp.from(Instant.now().truncatedTo(ChronoUnit.MICROS)), existing);
+            db.update("UPDATE platform_issue SET source_decision = ?, status = CASE WHEN revision = 0 THEN ? ELSE status END, updated_at = ? WHERE id = ?",
+                    status, status, Timestamp.from(Instant.now().truncatedTo(ChronoUnit.MICROS)), existing);
             return new IssueId(existing, severity, false);
         }
 
@@ -253,6 +253,7 @@ public class PlatformIssueIngestService {
                 coalesce(description, title, "问题"), severity, status, confidence,
                 limit(sectionRef, 255), Timestamp.from(now), Timestamp.from(now));
 
+        db.update("UPDATE platform_issue SET source_decision = ? WHERE id = ?", status, id);
         return new IssueId(id, severity, true);
     }
 

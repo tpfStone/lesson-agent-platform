@@ -231,33 +231,13 @@ function restoreGeneratedLesson() {
 }
 async function saveGeneratedLesson() {
   if (generationSaveBusy.value || generatedLesson.value || !store.result || !job.value || job.value.mode !== "GENERATE" || job.value.status !== "COMPLETED") return;
-  const plan = store.result.bestLessonPlan as Record<string, unknown>;
-  const metadata = (plan.metadata && typeof plan.metadata === "object" ? plan.metadata : {}) as Record<string, unknown>;
-  const title = textValue(metadata.topic) || job.value.topic || "生成教案";
-  const subject = textValue(metadata.subject) || job.value.subject;
-  const grade = textValue(metadata.grade) || job.value.grade;
-  const topic = textValue(metadata.topic) || job.value.topic;
-  const rawDuration = typeof metadata.duration_minutes === "number" ? metadata.duration_minutes : job.value.durationMinutes;
-  const durationMinutes = typeof rawDuration === "number" && Number.isInteger(rawDuration) && rawDuration >= 5 && rawDuration <= 240 ? rawDuration : null;
-  const content = lessonPlanToText(plan);
-  if (!subject?.trim() || !grade?.trim() || !topic?.trim() || !content) {
-    generationSaveError.value = "生成结果缺少保存教案所需的基本信息，请先下载结果文件并保留本次任务。";
-    return;
-  }
-
+  const title = job.value.topic || "生成教案";
   generationSaveBusy.value = true;
   generationSaveAttempted.value = true;
   generationSaveError.value = "";
   try {
-    const detail = (await axios.post<PlatformLessonDetail>("/api/platform/lessons", {
-      title, subject, grade, topic, durationMinutes, content,
-    })).data;
-    const versionId = detail.lesson.currentVersionId;
-    const version = detail.versions.find(item => item.id === versionId) || detail.versions[detail.versions.length - 1];
-    if (!detail.lesson.id || !versionId || !version) throw new Error("generated lesson save response is incomplete");
-    generatedLesson.value = {
-      lessonId: detail.lesson.id, versionId, versionNumber: version.versionNumber, title: detail.lesson.title || title,
-    };
+    const saved = (await axios.post<GeneratedLessonSave>(`/api/v1/lesson-jobs/${encodeURIComponent(props.jobId)}/platform-lesson`)).data;
+    generatedLesson.value = { ...saved, title };
     try { window.localStorage.setItem(generatedLessonStorageKey(), JSON.stringify(generatedLesson.value)); } catch { /* server save remains valid */ }
   } catch (reason) {
     generationSaveError.value = friendlyError(reason, "教案已经生成，但暂时无法保存到“我的教案”。请稍后重试，不会重新运行模型。");

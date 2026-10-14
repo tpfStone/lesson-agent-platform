@@ -23,6 +23,7 @@ CLASSROOM_SECTION_TYPES = {
     "teaching_process",
     "practice",
     "summary",
+    "mixed",
 }
 
 # F4 may return a whole DOCX teaching process as one section. Unlike F3's
@@ -141,6 +142,14 @@ def convert_f4_sections_to_f3_materials(
             materials.append(convert_section_to_material(section, len(materials) + 1))
 
     if materials:
+        excluded = [section for section in ordered_sections if not is_classroom_section(section)
+                    and isinstance(section.get('current_content'), str) and section['current_content'].strip()]
+        context = '\n\n'.join(section['current_content'] for section in excluded)
+        for material in materials:
+            material['metadata']['documentContext'] = context
+            material['metadata']['nonClassroomSectionIds'] = [s.get('id') for s in excluded]
+            if material['metadata'].get('source_section_type') == 'mixed':
+                material['metadata']['warnings'] = ['Mixed section retained in full; classroom boundaries are unverified']
         return materials
 
     # Compatibility fallback: do not discard a valid lesson merely because its

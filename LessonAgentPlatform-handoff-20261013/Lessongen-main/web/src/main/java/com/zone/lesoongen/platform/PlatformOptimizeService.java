@@ -33,6 +33,9 @@ import com.zone.lesoongen.platform.PlatformLessonController.LessonVersion;
 @Service
 public class PlatformOptimizeService {
     private final JdbcTemplate db;
+    private final org.springframework.transaction.support.TransactionTemplate tx;
+    private final PlatformLessonDocumentService documents;
+    private final DocxLessonExtractor extractor;
     private final PlatformLessonService lessons;
     private final LessonJobService jobs;
     private final LessonResultService results;
@@ -40,7 +43,9 @@ public class PlatformOptimizeService {
 
     public PlatformOptimizeService(JdbcTemplate db, PlatformLessonService lessons,
                                    LessonJobService jobs, LessonResultService results,
-                                   PlatformIssueContextService issueContext) {
+                                   PlatformIssueContextService issueContext, PlatformLessonDocumentService documents, DocxLessonExtractor extractor, org.springframework.transaction.PlatformTransactionManager transactionManager) {
+        this.tx = new org.springframework.transaction.support.TransactionTemplate(transactionManager);
+        this.documents = documents; this.extractor = extractor;
         this.db = db; this.lessons = lessons; this.jobs = jobs; this.results = results;
         this.issueContext = issueContext;
     }
@@ -51,7 +56,6 @@ public class PlatformOptimizeService {
     public record Saved(String lessonId, String sourceVersionId, String versionId,
             boolean alreadySaved, boolean unchanged) {}
 
-    @Transactional
     public LessonResponses.JobAccepted start(String lessonId, PlatformOptimizeController.Start input) {
         LessonDetail detail = lessons.detail(lessonId);
         if (!Objects.equals(detail.lesson().currentVersionId(), input.versionId())) {
@@ -77,7 +81,7 @@ public class PlatformOptimizeService {
                 input.classSize(), input.availableResources(), input.additionalRequirements(),
                 input.lessonStyle(), input.detailLevel(),
                 focus, input.mustPreserveContent(), null);
-        var accepted = jobs.createOptimize(request, docx(version.content()), input.requestKey().toString());
+        var accepted = jobs.createOptimize(request, inputDocx(lessonId, version), input.requestKey().toString());
         db.update("""
                 INSERT IGNORE INTO platform_optimize_job_link
                 (job_id, lesson_id, source_version_id, saved_version_id, created_at)
@@ -112,8 +116,16 @@ public class PlatformOptimizeService {
                 ownerUserId);
     }
 
-    @Transactional
     public Saved save(String lessonId, String jobId) {
+        Link before = link(lessonId, jobId);
+        if (before.savedVersionId() != null) return new Saved(lessonId, before.sourceVersionId(), before.savedVersionId(), true,
+                before.savedVersionId().equals(before.sourceVersionId()));
+        var result = results.result(jobId);
+        boolean changed = result.optimization() != null && result.optimization().path("content_changed").asBoolean(false);
+        var word = !changed ? null : results.artifacts(jobId).stream().filter(a -> a.type() == ArtifactType.BEST_DOCX)
+                .findFirst().orElseThrow(() -> new AppException(HttpStatus.CONFLICT, "OPTIMIZE_WORD_MISSING", "优化稿 Word 尚未生成，请稍后重试"));
+        var extracted = word == null ? null : readStructuredDocx(jobId, word.artifactId());
+        return tx.execute(transaction -> {
         List<Link> locked = db.query("""
                 SELECT job_id, lesson_id, source_version_id, saved_version_id
                 FROM platform_optimize_job_link WHERE lesson_id = ? AND job_id = ? FOR UPDATE
@@ -125,31 +137,29 @@ public class PlatformOptimizeService {
             return new Saved(lessonId, binding.sourceVersionId(), binding.savedVersionId(), true,
                     binding.savedVersionId().equals(binding.sourceVersionId()));
         }
-        var result = results.result(jobId);
         LessonDetail detail = lessons.detail(lessonId);
         if (!Objects.equals(detail.lesson().currentVersionId(), binding.sourceVersionId())) {
             throw new AppException(HttpStatus.CONFLICT, "OPTIMIZE_VERSION_CHANGED", "教案已有新版本，请先查看后再决定如何合并优化结果");
         }
-        boolean changed = result.optimization() != null && result.optimization().path("content_changed").asBoolean(false);
         String savedId = binding.sourceVersionId();
         if (changed) {
-            var word = results.artifacts(jobId).stream().filter(a -> a.type() == ArtifactType.BEST_DOCX)
-                    .findFirst().orElseThrow(() -> new AppException(HttpStatus.CONFLICT,
-                            "OPTIMIZE_WORD_MISSING", "优化稿 Word 尚未生成，请稍后重试"));
-            String content = readDocx(jobId, word.artifactId());
+            String content = extracted.extractedContent();
             if (content.length() > 100000) {
                 throw new AppException(HttpStatus.BAD_REQUEST, "OPTIMIZE_CONTENT_TOO_LONG", "优化稿超过教案版本长度限制");
             }
             String original = detail.versions().stream().filter(v -> v.id().equals(binding.sourceVersionId()))
                     .findFirst().orElseThrow(() -> AppException.notFound("教案版本")).content();
             if (!content.isBlank() && !content.equals(original.trim())) {
-                savedId = lessons.addVersionFromModule(lessonId, binding.sourceVersionId(), content,
-                        "F2_OPTIMIZE", "f2:" + jobId).lesson().currentVersionId();
+                savedId = lessons.addStructuredVersion(lessonId, binding.sourceVersionId(), content,
+                        "F2_OPTIMIZE", "f2:" + jobId, extracted.structuredContent(), "PARSED", "F2_BEST_DOCX", extracted.warnings()).lesson().currentVersionId();
+                db.update("UPDATE platform_lesson_version_structure SET source_artifact_id = ?, source_artifact_sha256 = ? WHERE version_id = ?",
+                        word.artifactId(), word.sha256(), savedId);
             }
         }
         db.update("UPDATE platform_optimize_job_link SET saved_version_id = ? WHERE job_id = ?", savedId, jobId);
         return new Saved(lessonId, binding.sourceVersionId(), savedId, false,
                 savedId.equals(binding.sourceVersionId()));
+        });
     }
 
     public record ReviewDraft(String lessonId, String jobId, String sourceVersionId, int sourceVersionNumber,
@@ -188,8 +198,17 @@ public class PlatformOptimizeService {
                 candidate, sourceName, status, binding.savedVersionId());
     }
 
-    @Transactional
     public ReviewSaved submitReview(String lessonId, String jobId, PlatformOptimizeReviewController.Submit request) {
+        // Parse immutable artifacts before acquiring any database lock.
+        Link before = link(lessonId, jobId);
+        reviewableStatus(jobId);
+        if (!Boolean.TRUE.equals(request.confirmed())) throw new AppException(HttpStatus.BAD_REQUEST,
+                "REVIEW_NOT_CONFIRMED", "请先确认已核对教案正文");
+        var available = before.savedVersionId() == null ? results.artifacts(jobId) : List.<LessonResponses.Artifact>of();
+        var candidate = available.stream().filter(a -> a.type() == ArtifactType.REVISED_CANDIDATE_DOCX).findFirst()
+                .orElseGet(() -> available.stream().filter(a -> a.type() == ArtifactType.BEST_DOCX).findFirst().orElse(null));
+        var parsed = candidate == null ? null : readStructuredDocx(jobId, candidate.artifactId());
+        return tx.execute(transaction -> {
         List<Link> locked = db.query("""
                 SELECT job_id, lesson_id, source_version_id, saved_version_id
                 FROM platform_optimize_job_link WHERE lesson_id = ? AND job_id = ? FOR UPDATE
@@ -208,6 +227,10 @@ public class PlatformOptimizeService {
         if (binding.savedVersionId() != null) {
             LessonVersion saved = detail.versions().stream().filter(v -> v.id().equals(binding.savedVersionId()))
                     .findFirst().orElseThrow(() -> AppException.notFound("已保存的教案版本"));
+            if (!saved.content().trim().equals(request.content().trim())) {
+                throw new AppException(HttpStatus.CONFLICT, "OPTIMIZE_REVIEW_CONFLICT",
+                        "此任务已保存另一份复核内容，请保留当前草稿并刷新后合并");
+            }
             return new ReviewSaved(lessonId, saved.id(), saved.versionNumber(), true,
                     saved.id().equals(binding.sourceVersionId()));
         }
@@ -220,13 +243,20 @@ public class PlatformOptimizeService {
         String savedId = original.id();
         int number = original.versionNumber();
         if (!content.equals(original.content().trim())) {
-            LessonDetail updated = lessons.addVersionFromModule(lessonId, original.id(), content,
-                    "F2_OPTIMIZE", "f2:" + jobId + ":teacher-reviewed");
+            boolean sameCandidate = parsed != null && content.equals(parsed.extractedContent());
+            LessonDetail updated = lessons.addStructuredVersion(lessonId, original.id(), content,
+                    "F2_OPTIMIZE", "f2:" + jobId + ":teacher-reviewed",
+                    sameCandidate ? parsed.structuredContent() : null, sameCandidate ? "PARSED" : "EDITED_FALLBACK",
+                    sameCandidate ? "F2_CANDIDATE_DOCX" : "PLAIN_TEXT", sameCandidate ? parsed.warnings()
+                            : List.of("教师已自由编辑候选正文；按实际确认内容保存兼容结构。"));
             savedId = updated.lesson().currentVersionId();
+            if (sameCandidate) db.update("UPDATE platform_lesson_version_structure SET source_artifact_id = ?, source_artifact_sha256 = ? WHERE version_id = ?",
+                    candidate.artifactId(), candidate.sha256(), savedId);
             number = updated.versions().stream().mapToInt(LessonVersion::versionNumber).max().orElse(number);
         }
         db.update("UPDATE platform_optimize_job_link SET saved_version_id = ? WHERE job_id = ?", savedId, jobId);
         return new ReviewSaved(lessonId, savedId, number, false, savedId.equals(original.id()));
+        });
     }
 
     private String reviewableStatus(String jobId) {
@@ -239,27 +269,27 @@ public class PlatformOptimizeService {
     }
 
     private String readDocx(String jobId, String artifactId) {
-        try (InputStream stream = results.download(jobId, artifactId).resource().getInputStream();
-             XWPFDocument document = new XWPFDocument(stream)) {
-            List<String> lines = new ArrayList<>();
+        return readStructuredDocx(jobId, artifactId).extractedContent();
+    }
 
-            for (var element : document.getBodyElements()) {
-                if (element instanceof XWPFParagraph paragraph) {
-                    lines.add(paragraph.getText());
-                } else if (element instanceof XWPFTable table) {
-                    for (var row : table.getRows()) {
-                        lines.add(row.getTableCells().stream()
-                                .map(cell -> cell.getText())
-                                .reduce((a, b) -> a + "\t" + b).orElse(""));
-                    }
-                }
-            }
-
-            return String.join("\n", lines).trim();
+    private DocxLessonExtractor.ExtractedDocument readStructuredDocx(String jobId, String artifactId) {
+        try (InputStream stream = results.download(jobId, artifactId).resource().getInputStream()) {
+            return extractor.extract(LessonDocumentFiles.upload(stream.readAllBytes()), 20L * 1024 * 1024);
         } catch (IOException error) {
-            throw new AppException(HttpStatus.INTERNAL_SERVER_ERROR,
-                    "REVIEW_DRAFT_READ_FAILED", "无法读取修改候选稿");
+            throw new AppException(HttpStatus.INTERNAL_SERVER_ERROR, "REVIEW_DRAFT_READ_FAILED", "无法读取所采用的教案产物");
         }
+    }
+
+    private MultipartFile inputDocx(String lessonId, LessonVersion version) {
+        try {
+            var snapshot = documents.get(lessonId, version.id());
+            if ("VERIFIED".equals(snapshot.bindingStatus())) return LessonDocumentFiles.upload(LessonDocumentDocxExporter.export(snapshot.document()));
+        } catch (AppException error) {
+            if (!"LESSON_DOCUMENT_NOT_FOUND".equals(error.code())) throw error;
+        } catch (IOException error) {
+            throw new AppException(HttpStatus.INTERNAL_SERVER_ERROR, "OPTIMIZE_DOCX_FAILED", "无法生成优化输入 Word");
+        }
+        return docx(version.content());
     }
 
     private static String nonblank(String value, String fallback) {

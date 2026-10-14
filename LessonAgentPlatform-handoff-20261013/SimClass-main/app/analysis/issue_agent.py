@@ -100,8 +100,10 @@ class IssueAnalysisAgent:
         chunks = self._chunk_events(events, max_events=20)
         collected: list[IssueRecord] = []
         all_warnings = list(base_warnings)
+        failed_chunks = 0
         for chunk_index, chunk in enumerate(chunks, start=1):
-            issues, warnings = self._analyze_validated_chunk(chunk, materials)
+            issues, warnings, failed = self._analyze_validated_chunk(chunk, materials)
+            failed_chunks += int(failed)
             collected.extend(issues)
             all_warnings.extend(
                 f"chunk {chunk_index}: {warning}" for warning in warnings
@@ -118,29 +120,31 @@ class IssueAnalysisAgent:
             materials,
         )
         all_warnings.extend(final_outcome.warnings)
-        return self._result(
+        result = self._result(
             session_id, version_id, final_outcome.valid_issues, all_warnings, model_mode
         )
+        result.analysis_status = 'FAILED' if failed_chunks == len(chunks) else ('PARTIAL' if failed_chunks else 'COMPLETED')
+        return result
 
     def _analyze_validated_chunk(
         self,
         events: list[ClassroomEventRecord],
         materials: list[dict[str, Any]],
-    ) -> tuple[list[IssueRecord], list[str]]:
+    ) -> tuple[list[IssueRecord], list[str], bool]:
         first_raw, first_error = self._call_llm(events, materials, repair_warnings=None)
         if first_error:
-            return [], [first_error]
+            return [], [first_error], True
         first_outcome = self.validator.validate(first_raw, events, materials)
         if not first_outcome.warnings:
-            return first_outcome.valid_issues, []
+            return first_outcome.valid_issues, [], False
 
         second_raw, second_error = self._call_llm(
             events, materials, repair_warnings=first_outcome.warnings
         )
         if second_error:
-            return first_outcome.valid_issues, first_outcome.warnings + [second_error]
+            return first_outcome.valid_issues, first_outcome.warnings + [second_error], True
         second_outcome = self.validator.validate(second_raw, events, materials)
-        return second_outcome.valid_issues, first_outcome.warnings + second_outcome.warnings
+        return second_outcome.valid_issues, first_outcome.warnings + second_outcome.warnings, False
 
     @staticmethod
     def _chunk_events(

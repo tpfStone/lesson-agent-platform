@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { onMounted, watch } from "vue";
 import { useRoute } from "vue-router";
+import { useAuthStore } from "./stores/auth";
+const auth = useAuthStore();
 
 const route = useRoute();
 const titles: Record<string, string> = {
@@ -29,5 +31,5 @@ watch(() => route.name, updateTitle);
 
 <template>
   <a class="skip-link" href="#main-content">跳到主要内容</a>
-  <RouterView />
+  <RouterView :key="auth.user?.id || 'anonymous'" />
 </template>

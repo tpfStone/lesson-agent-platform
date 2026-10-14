@@ -22,12 +22,16 @@ def create_app(session_factory=SessionLocal, config_factory=None, auth_provider=
     auth = auth_provider or AUTH_PROVIDERS[factory.settings.auth_provider](factory.settings)
 
     @contextmanager
-    def transaction(request):
+    def transaction(request, write=True):
+        # Identity provisioning has its own short transaction, including the first dev user.
+        with session_factory() as identity_db:
+            user = auth.get_current_user(identity_db, request)
+            identity_db.commit()
         with session_factory() as db:
             try:
-                if db.bind.dialect.name == 'sqlite':
+                if write and db.bind.dialect.name == 'sqlite':
                     db.execute(text('BEGIN IMMEDIATE'))
-                yield Workflow(db, factory, auth.get_current_user(db, request))
+                yield Workflow(db, factory, user)
                 db.commit()
             except WorkflowError as exc:
                 db.rollback()
@@ -45,12 +49,12 @@ def create_app(session_factory=SessionLocal, config_factory=None, auth_provider=
 
     @app.get('/api/me')
     def me(request: Request):
-        with transaction(request) as w:
+        with transaction(request, write=False) as w:
             return {'id': w.current_user.id, 'username': w.current_user.username, 'role': w.current_user.role}
 
     @app.get('/api/capabilities')
     def capabilities(request: Request):
-        with transaction(request) as w:
+        with transaction(request, write=False) as w:
             return {'contributors': factory.settings.context_contributors,
                 'verified_cases': w.db.scalar(select(func.count()).select_from(m.CaseItem).join(m.DatasetAnnotation,
                     m.CaseItem.source_annotation_id == m.DatasetAnnotation.id).where(m.CaseItem.verification_status == 'verified',
@@ -60,12 +64,12 @@ def create_app(session_factory=SessionLocal, config_factory=None, auth_provider=
 
     @app.get('/api/sessions')
     def history(request: Request):
-        with transaction(request) as w:
+        with transaction(request, write=False) as w:
             return w.list_sessions()
 
     @app.get('/api/sessions/{session_id}/chat')
     def chat(request: Request, session_id: UUID):
-        with transaction(request) as w:
+        with transaction(request, write=False) as w:
             return w.export(w.session(str(session_id)))['chat_messages']
 
     @app.post('/api/sessions')
@@ -75,7 +79,7 @@ def create_app(session_factory=SessionLocal, config_factory=None, auth_provider=
 
     @app.get('/api/sessions/{session_id}/current-state')
     def current_state(request: Request, session_id: UUID):
-        with transaction(request) as w:
+        with transaction(request, write=False) as w:
             return w.resume_session(str(session_id))
 
     @app.post('/api/sessions/{session_id}/view')
@@ -128,7 +132,7 @@ def create_app(session_factory=SessionLocal, config_factory=None, auth_provider=
 
     @app.get('/api/sessions/{session_id}/final')
     def final(request: Request, session_id: UUID):
-        with transaction(request) as w:
+        with transaction(request, write=False) as w:
             session = w.session(str(session_id))
             if session.status != 'TERMINATED':
                 raise WorkflowError('会话尚未结束。')
@@ -136,7 +140,7 @@ def create_app(session_factory=SessionLocal, config_factory=None, auth_provider=
 
     @app.get('/api/sessions/{session_id}/export')
     def export(request: Request, session_id: UUID):
-        with transaction(request) as w:
+        with transaction(request, write=False) as w:
             result = w.export(w.session(str(session_id)))
         return JSONResponse(content=jsonable_encoder(result), headers={
             'Content-Disposition': f'attachment; filename="pedago-loop-{session_id}.json"'})

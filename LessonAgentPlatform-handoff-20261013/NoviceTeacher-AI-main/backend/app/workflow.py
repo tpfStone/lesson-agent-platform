@@ -6,7 +6,8 @@ LLM call deliberately holds that lock in this MVP to prevent duplicate generatio
 import hashlib
 import json
 from datetime import datetime, timezone
-from sqlalchemy import select, func
+from sqlalchemy import select, func, text
+from uuid import uuid4
 from . import models as m
 from .history import HistoryReader
 from .orchestrator import ReviewOrchestrator
@@ -14,6 +15,8 @@ from .providers.interfaces import SuggestionDraft
 from .context import ContextBuildRequest
 from .audit import GenerationAudit
 from .auth import AuthorizationPolicy
+from . import structured_adapter
+from .providers.llm import ProviderError
 
 
 class WorkflowError(Exception):
@@ -76,7 +79,10 @@ class Workflow:
 
     def create_session(self, data):
         payload = data.model_dump(mode='json')
-        fingerprint = hashlib.sha256(json.dumps({'metadata': payload['metadata'], 'content': data.content},
+        identity = {'metadata': payload['metadata'], 'content': data.content}
+        if data.structured_content is not None:
+            identity.update(structured_content=data.structured_content, source_binding=data.source_binding)
+        fingerprint = hashlib.sha256(json.dumps(identity,
                                                 sort_keys=True, ensure_ascii=False).encode()).hexdigest()
         existing = self.one(m.Session, request_key=str(data.request_key))
         if existing:
@@ -92,17 +98,32 @@ class Workflow:
         self.add(m.SystemConfigSnapshot, session_id=session.id, version=snapshot['version'], config=snapshot)
         self.add(m.Conversation, session_id=session.id)
         self.event(session, 'SESSION_CREATED', {'config': snapshot})
-        lesson = self.add(m.LessonPlan, session_id=session.id, original_content=data.content, current_content=data.content)
+        lesson = self.add(m.LessonPlan, session_id=session.id, original_content=data.content, current_content=data.content,
+                          structured_content=data.structured_content, source_binding=data.source_binding)
         original = self.add(m.LessonPlanVersion, lesson_plan_id=lesson.id, round_number=0, content=data.content)
         self.event(session, 'LESSON_PLAN_SUBMITTED', {'lesson_plan_id': lesson.id, 'version_id': original.id})
         self.chat(session, 'user', data.content, 'lesson_plan')
-        drafts = self.config(session).section_parser.parse(data.content, payload['metadata'])
-        if not drafts or ''.join(d.content for d in drafts) != data.content:
-            raise WorkflowError('切分器必须返回非空列表并完整保留原文。', 422)
+        source_refs = []
+        if data.structured_content is not None:
+            try:
+                adapted = structured_adapter.sections(data.structured_content, data.content)
+                drafts, source_refs = [x[0] for x in adapted], [x[1] for x in adapted]
+                binding = data.source_binding or {}
+                if binding.get('contentSha256') and binding['contentSha256'] != hashlib.sha256(data.content.encode()).hexdigest():
+                    raise ValueError('CONTENT_SHA_MISMATCH')
+                if binding.get('structureSha256') and binding['structureSha256'] != structured_adapter.digest(data.structured_content):
+                    raise ValueError('STRUCTURE_SHA_MISMATCH')
+            except (ValueError, KeyError, TypeError) as error:
+                raise WorkflowError(str(error), 422) from error
+        else:
+            drafts = self.config(session).section_parser.parse(data.content, payload['metadata'])
+            if not drafts or ''.join(d.content for d in drafts) != data.content:
+                raise WorkflowError('切分器必须返回非空列表并完整保留原文。', 422)
         sections = []
         for i, draft in enumerate(drafts):
             section = self.add(m.Section, lesson_plan_id=lesson.id, title=draft.title,
-                               order_index=i, section_type=draft.section_type, current_content=draft.content)
+                               order_index=i, section_type=draft.section_type, current_content=draft.content,
+                               source_ref=source_refs[i] if source_refs else None)
             self.add(m.SectionVersion, section_id=section.id, round_number=0, version_number=0, content=draft.content)
             sections.append(section)
         self.event(session, 'SECTIONS_PARSED', {'parser': snapshot['section_parser'], 'section_ids': [s.id for s in sections]})
@@ -172,14 +193,53 @@ class Workflow:
         round, section, review = self.active_target(session, round_id, section_id)
         if review.generated_at:
             return None
+        if review.generation_claim and review.claimed_at:
+            age = (m.now() - review.claimed_at.replace(tzinfo=timezone.utc)).total_seconds()
+            if age < 300:
+                raise WorkflowError('此章节正在生成建议，请稍后恢复状态。')
+        claim = str(uuid4())
+        review.generation_claim, review.claimed_at = claim, m.now()
+        expected_version = self.latest(section.id).id
         audit = GenerationAudit(self, session, round, section, review)
         sections = self.sections(section.lesson_plan_id)
         overview = self.ensure_overview(session, sections)
         snapshots = [{**dump(s), 'version_id': self.latest(s.id).id} for s in sections]
         request = ContextBuildRequest(user_id=self.current_user.id, session=dump(session), round=dump(round),
             section=next(s for s in snapshots if s['id'] == section.id), all_sections=snapshots, overview=dump(overview))
-        _, error = ReviewOrchestrator(self.config(session)).generate(request, audit)
-        return error
+        config = self.config(session)
+        generation = None
+        try:
+            context = config.context_engine.prepare(request, audit)
+            generation = audit.started(context)
+        except (ProviderError, ValueError, TypeError) as error:
+            failure = error if isinstance(error, ProviderError) else ProviderError('PROVIDER_CONTRACT', str(error))
+            audit.failed(generation, failure)
+            review.generation_claim = None
+            return failure
+        self.db.commit()  # Durable claim and context; no transaction spans the model request.
+        failure, suggestions = None, []
+        try:
+            suggestions = [SuggestionDraft.model_validate(x) for x in config.suggestion_provider.generate(context)]
+            if len(suggestions) > 2: raise ValueError('More than two suggestions')
+        except ProviderError as error:
+            failure = error
+        except Exception:
+            failure = ProviderError('PROVIDER_CONTRACT', '模型调用或输出失败，请重试。')
+        if self.db.bind.dialect.name == 'sqlite': self.db.execute(text('BEGIN IMMEDIATE'))
+        self.db.expire_all()
+        round, section, review = self.active_target(session, round_id, section_id)
+        if review.generation_claim != claim or self.latest(section.id).id != expected_version:
+            raise WorkflowError('生成期间章节已变化，本次过期结果未保存。')
+        review.generation_claim = None
+        if failure:
+            audit.failed(generation, failure)
+            return failure
+        try:
+            audit.completed(generation, suggestions, getattr(config.suggestion_provider, 'last_raw', None))
+        except ProviderError as error:
+            audit.failed(generation, error)
+            return error
+        return None
 
     def decide(self, session, suggestion_id, decision, confirm_append=False, expected_version_id=None):
         suggestion = self.one(m.Suggestion, id=suggestion_id)
@@ -219,7 +279,24 @@ class Workflow:
                     version_number=previous.version_number + 1, previous_version_id=previous.id, content=content)
                 section.current_content = content
                 lesson = self.one(m.LessonPlan, session_id=session.id)
-                lesson.current_content = ''.join(s.current_content for s in self.sections(lesson.id))
+                if lesson.structured_content is not None:
+                    try:
+                        lesson.structured_content = structured_adapter.revise(lesson.structured_content,
+                            section.source_ref, previous.content, content)
+                        lesson.current_content = structured_adapter.project(lesson.structured_content)
+                    except ValueError:
+                        # Preserve the complete document, including headers and cells outside sections.
+                        lesson.fallback_projection = structured_adapter.fallback_edit(None,
+                            lesson.structured_content, section.source_ref, content)
+                        lesson.structured_content = None
+                        lesson.structure_warnings = ['TEXT_FALLBACK: accepted revision cannot be mapped to authoritative cells']
+                        lesson.current_content = structured_adapter.project_fallback(lesson.fallback_projection)
+                elif lesson.fallback_projection:
+                    lesson.fallback_projection = structured_adapter.fallback_edit(lesson.fallback_projection,
+                        None, section.source_ref, content)
+                    lesson.current_content = structured_adapter.project_fallback(lesson.fallback_projection)
+                else:
+                    lesson.current_content = ''.join(s.current_content for s in self.sections(lesson.id))
                 self.event(session, 'SECTION_UPDATED', {'previous_version_id': previous.id, 'version_id': version.id,
                     'suggestion_id': suggestion.id, 'decision_id': saved.id}, round.id, section.id)
 

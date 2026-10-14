@@ -1,9 +1,12 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { RouterLink, useRoute, useRouter } from "vue-router";
 import axios from "axios";
 import AppPageHeader from "../components/AppPageHeader.vue";
 import ReviewDocumentPreview from "../components/ReviewDocumentPreview.vue";
+import LessonDocumentPreview from "../components/LessonDocumentPreview.vue";
+import LessonIssuePanel from "../components/LessonIssuePanel.vue";
+import { useVersionDocument } from "../composables/useVersionDocument";
 interface Lesson { id:string;title:string;subject:string;grade:string;topic:string;currentVersionId:string;updatedAt:string }
 interface Version { id:string;versionNumber:number;content:string;sourceModule:string;createdAt:string }
 interface Detail { lesson:Lesson;versions:Version[] }
@@ -15,9 +18,33 @@ function describe(reason:unknown){return axios.isAxiosError(reason)?((reason.res
 function formatTime(value:string){return new Intl.DateTimeFormat("zh-CN",{timeZone:"Asia/Shanghai",year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",hour12:false}).format(new Date(value))}
 function formatBytes(value:number){return value<1024*1024?`${(value/1024).toFixed(1)} KB`:`${(value/1024/1024).toFixed(1)} MB`}
 async function loadList(){loading.value=true;try{list.value=(await axios.get<Lesson[]>("/api/platform/lessons")).data}catch(reason){error.value=describe(reason)}finally{loading.value=false}}
-async function loadDetail(id:string){if(!id){detail.value=null;return}loading.value=true;error.value="";try{detail.value=(await axios.get<Detail>(`/api/platform/lessons/${encodeURIComponent(id)}`)).data;const requested=typeof route.query.version==="string"?route.query.version:"";selectedId.value=detail.value.versions.some(v=>v.id===requested)?requested:detail.value.lesson.currentVersionId;source.value=await axios.get<SourceDoc>(`/api/platform/lessons/${encodeURIComponent(id)}/source-document`).then(r=>r.data).catch(()=>null)}catch(reason){error.value=describe(reason)}finally{loading.value=false}}
-function selectVersion(id:string){selectedId.value=id;void router.replace({query:{...route.query,version:id}})}
-onMounted(()=>{void loadList()});watch(lessonId,id=>{void loadDetail(id)},{immediate:true});
+const pdfAvailable=ref(false);
+let detailGeneration=0;
+onUnmounted(()=>{detailGeneration++});
+const {snapshot,state:documentState,error:documentError}=useVersionDocument(lessonId,selectedId);
+async function loadDetail(id:string){
+  const request=++detailGeneration;
+  detail.value=null;source.value=null;selectedId.value="";error.value="";pdfAvailable.value=false;
+  if(!id) return;
+  loading.value=true;
+  try {
+    const next=(await axios.get<Detail>(`/api/platform/lessons/${encodeURIComponent(id)}`)).data;
+    if(request!==detailGeneration) return;
+    detail.value=next;
+    const requested=typeof route.query.version==="string"?route.query.version:"";
+    selectedId.value=requested ? (next.versions.some(v=>v.id===requested)?requested:"") : next.lesson.currentVersionId;
+    if(!selectedId.value) error.value="没有找到所选教案版本。";
+    else void axios.get<{pdf:boolean}>(`/api/platform/lessons/${encodeURIComponent(id)}/versions/${encodeURIComponent(selectedId.value)}/export/capabilities`)
+      .then(response=>{if(request===detailGeneration)pdfAvailable.value=response.data.pdf===true}).catch(()=>{});
+    try {
+      const original=(await axios.get<SourceDoc>(`/api/platform/lessons/${encodeURIComponent(id)}/source-document`)).data;
+      if(request===detailGeneration) source.value=original;
+    } catch(reason) { if(request===detailGeneration && !(axios.isAxiosError(reason) && reason.response?.status===404)) error.value=describe(reason); }
+  } catch(reason) {if(request===detailGeneration) error.value=describe(reason)}
+  finally{if(request===detailGeneration)loading.value=false}
+}
+function selectVersion(id:string){selectedId.value=id;void router.push({query:{...route.query,version:id}})}
+onMounted(()=>{void loadList()});watch([lessonId,()=>route.query.version],([id])=>{void loadDetail(id)},{immediate:true});
 </script>
 
 <template><main class="lessons-page">
@@ -25,8 +52,13 @@ onMounted(()=>{void loadList()});watch(lessonId,id=>{void loadDetail(id)},{immed
   <p v-if="error" class="error" role="alert">{{ error }}</p>
   <template v-if="!lessonId"><section v-if="list.length" class="lesson-grid"><RouterLink v-for="lesson in list" :key="lesson.id" :to="`/lessons/${lesson.id}`" class="lesson-card v2-card"><div><small>{{ [lesson.subject,lesson.grade].filter(Boolean).join(' · ')||'教案' }}</small><h2>{{ lesson.title }}</h2><p>{{ lesson.topic||'未填写课题' }}</p></div><footer><span>更新于 {{ formatTime(lesson.updatedAt) }}</span><b>查看详情 →</b></footer></RouterLink></section><section v-else-if="!loading" class="empty v2-card"><h2>还没有教案</h2><p>从首页上传 DOCX，或使用设计修改功能生成第一份教案。</p><RouterLink class="v2-button v2-button--primary" to="/">返回首页</RouterLink></section><p v-else class="loading">正在读取教案……</p></template>
   <template v-else-if="detail"><section class="detail-layout"><aside class="version-panel v2-card"><div><small>版本历史</small><h2>{{ detail.lesson.title }}</h2><p>{{ detail.versions.length }} 个版本</p></div><button v-for="version in [...detail.versions].sort((a,b)=>b.versionNumber-a.versionNumber)" :key="version.id" type="button" :class="{selected:selectedId===version.id}" @click="selectVersion(version.id)"><b>V{{ version.versionNumber }}</b><span>{{ sourceNames[version.sourceModule]||version.sourceModule }}</span><small>{{ formatTime(version.createdAt) }}</small></button></aside>
-    <section class="content-panel v2-card"><header><div><small>{{ selected?`V${selected.versionNumber} · ${sourceNames[selected.sourceModule]||selected.sourceModule}`:'' }}</small><h2>{{ detail.lesson.title }}</h2><p>{{ selected?`创建于 ${formatTime(selected.createdAt)}`:'' }}</p></div><a v-if="exportUrl" class="v2-button v2-button--primary" :href="exportUrl" download>下载 DOCX</a></header><div v-if="source" class="source-note"><span>原始文件：{{ source.originalFilename }} · {{ formatBytes(source.sizeBytes) }}</span><a :href="`/api/platform/lessons/${encodeURIComponent(lessonId)}/source-document/file`">下载原稿</a></div><ReviewDocumentPreview :content="selected?.content||''" /></section></section>
+    <section class="content-panel v2-card"><header><div><small>{{ selected?`V${selected.versionNumber} · ${sourceNames[selected.sourceModule]||selected.sourceModule}`:'' }}</small><h2>{{ detail.lesson.title }}</h2><p>{{ selected?`创建于 ${formatTime(selected.createdAt)}`:'' }}</p></div><a v-if="exportUrl" class="v2-button v2-button--primary" :href="exportUrl" download>下载 DOCX</a><a v-if="pdfAvailable" class="v2-button v2-button--secondary" :href="exportUrl.replace(/docx$/,'pdf')" download>下载 PDF</a></header><div v-if="source" class="source-note"><span>原始文件：{{ source.originalFilename }} · {{ formatBytes(source.sizeBytes) }}</span><a :href="`/api/platform/lessons/${encodeURIComponent(lessonId)}/source-document/file`">下载原稿</a></div><p v-if="documentState==='loading'" role="status">正在加载所选版本结构……</p>
+<p v-else-if="documentState==='error'" role="alert">{{ documentError }}</p>
+<template v-else><p v-if="documentState==='fallback'" class="source-note">此版本使用正文兼容显示，教学表格尚未确认恢复。</p>
+<LessonDocumentPreview v-if="snapshot && documentState==='ready'" :document="snapshot.document" :warnings="snapshot.warnings" />
+<ReviewDocumentPreview v-else :content="selected?.content||''" /></template></section></section>
     <section class="next-actions v2-card"><div><small>继续处理</small><h2>使用当前版本</h2></div><RouterLink :to="{path:'/workflows',query:{lessonId,versionId:selectedId}}">选择工作流</RouterLink><RouterLink :to="{path:`/lessons/${lessonId}/annotate`,query:{version:selectedId}}">智能评价</RouterLink><RouterLink :to="{path:'/optimize-lesson',query:{lessonId,versionId:selectedId}}">设计修改</RouterLink><RouterLink :to="{path:'/simulate',query:{lessonId,versionId:selectedId}}">课堂推演</RouterLink><RouterLink :to="{path:'/navigation',query:{lessonId,versionId:selectedId}}">协同共析</RouterLink></section>
+    <LessonIssuePanel v-if="selectedId" :lesson-id="lessonId" :version-id="selectedId" />
   </template>
 </main></template>
 

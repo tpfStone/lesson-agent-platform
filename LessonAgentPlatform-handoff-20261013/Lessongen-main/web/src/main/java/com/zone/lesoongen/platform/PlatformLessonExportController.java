@@ -40,10 +40,29 @@ public class PlatformLessonExportController {
 
     private final PlatformLessonService lessons;
     private final LessonResultService results;
+    private final PlatformLessonDocumentService documents;
+    private final LessonVersionPdfService pdf;
 
-    public PlatformLessonExportController(PlatformLessonService lessons, LessonResultService results) {
+    public PlatformLessonExportController(PlatformLessonService lessons, LessonResultService results, PlatformLessonDocumentService documents, LessonVersionPdfService pdf) {
         this.lessons = lessons;
         this.results = results;
+        this.documents = documents;
+        this.pdf = pdf;
+    }
+
+    @GetMapping("/{lessonId}/versions/{versionId}/export/pdf")
+    public ResponseEntity<byte[]> exportPdf(@PathVariable String lessonId, @PathVariable String versionId) throws IOException {
+        var word = exportDocx(lessonId, versionId);
+        byte[] bytes = pdf.convert(word.getBody());
+        String filename = "lesson-" + versionId + ".pdf";
+        return ResponseEntity.ok().contentType(MediaType.APPLICATION_PDF).contentLength(bytes.length)
+                .header(HttpHeaders.CONTENT_DISPOSITION, ContentDisposition.attachment().filename(filename).build().toString()).body(bytes);
+    }
+
+    @GetMapping("/{lessonId}/versions/{versionId}/export/capabilities")
+    public java.util.Map<String, Object> capabilities(@PathVariable String lessonId, @PathVariable String versionId) {
+        if (lessons.detail(lessonId).versions().stream().noneMatch(v -> v.id().equals(versionId))) throw AppException.notFound("教案版本");
+        return java.util.Map.of("docx", true, "pdf", pdf.available(), "pdfUnavailableReason", pdf.available() ? "" : "PDF 转换器尚未配置");
     }
 
     @GetMapping("/{lessonId}/versions/{versionId}/export/docx")
@@ -53,10 +72,14 @@ public class PlatformLessonExportController {
         var version = detail.versions().stream().filter(v -> v.id().equals(versionId)).findFirst()
                 .orElseThrow(() -> new AppException(HttpStatus.NOT_FOUND, "RESOURCE_NOT_FOUND", "教案版本不存在"));
 
-        // F2 原生版本优先复用任务本身生成的漂亮 Word。
-        // 不仅检查 jobId，还会把候选 Word 重新抽取为纯文本，与当前 version.content 比较。
-        // 只有正文一致时才返回原生 Word，避免 teacher-reviewed / 历史 artifact 内容错版。
-        byte[] bytes = nativeF2Docx(version);
+        // The selected immutable version is authoritative for every export format.
+        byte[] bytes = null;
+        try {
+            var snapshot = documents.get(lessonId, versionId);
+            if ("VERIFIED".equals(snapshot.bindingStatus())) bytes = LessonDocumentDocxExporter.export(snapshot.document());
+        } catch (AppException missing) {
+            if (!"LESSON_DOCUMENT_NOT_FOUND".equals(missing.code())) throw missing;
+        }
         if (bytes == null) {
             bytes = fallbackDocx(detail.lesson().title(), version.versionNumber(), version.content());
         }

@@ -36,6 +36,7 @@ import com.zone.lesoongen.platform.PlatformNavigationBridgeController.Save;
 public class PlatformNavigationBridgeService {
     private final JdbcTemplate db;
     private final PlatformLessonService lessons;
+    private final PlatformLessonDocumentService documents;
     private final PlatformIssueIngestService issueIngest;
     private final PlatformIssueContextService issueContext;
     private final ObjectMapper mapper;
@@ -46,9 +47,11 @@ public class PlatformNavigationBridgeService {
                                            PlatformIssueIngestService issueIngest,
                                            PlatformIssueContextService issueContext,
                                            ObjectMapper mapper, PlatformTransactionManager transactionManager,
+                                           PlatformLessonDocumentService documents,
                                            @Value("${platform.f4.base-url:http://127.0.0.1:8000}") String baseUrl) {
         this.db = db; this.lessons = lessons; this.issueIngest = issueIngest;
         this.issueContext = issueContext; this.mapper = mapper;
+        this.documents = documents;
         transactions = new TransactionTemplate(transactionManager);
         SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
         factory.setConnectTimeout(Duration.ofSeconds(5));
@@ -66,7 +69,7 @@ public class PlatformNavigationBridgeService {
     private record Binding(String lessonId, String sourceVersionId) {}
     private record Head(String id, int number, String hash) {}
     private record Snapshot(String sessionId, String roundId, int roundNumber, String status,
-            String original, String content, String hash, Map<?, ?> metadata) {}
+            String original, String content, String hash, Map<?, ?> metadata, LessonDocument document) {}
 
     public Started start(String lessonId, String versionId, UUID requestKey,
             String subject, String grade, String topic) {
@@ -92,8 +95,20 @@ public class PlatformNavigationBridgeService {
             metadata.put("additional_context", additionalContext);
         }
 
-        Map<?, ?> response = nativeRequest("/sessions", Map.of("request_key", requestKey.toString(),
-                "metadata", metadata, "content", version.content()));
+        Map<String, Object> payload = new java.util.LinkedHashMap<>();
+        payload.put("request_key", requestKey.toString()); payload.put("metadata", metadata); payload.put("content", version.content());
+        try {
+            var snapshot = documents.get(lessonId, versionId);
+            if ("VERIFIED".equals(snapshot.bindingStatus())) {
+                payload.put("structured_content", snapshot.document());
+                payload.put("source_binding", Map.of("lessonId", lessonId, "versionId", versionId,
+                        "contentSha256", snapshot.contentSha256(), "structureSha256", snapshot.structureSha256(),
+                        "projectionVersion", snapshot.projectionVersion()));
+            }
+        } catch (AppException missing) {
+            if (!"LESSON_DOCUMENT_NOT_FOUND".equals(missing.code())) throw missing;
+        }
+        Map<?, ?> response = nativeRequest("/sessions", payload);
         Map<?, ?> session = object(response.get("session"));
         String sessionId = text(session.get("id"));
         try { sessionId = UUID.fromString(sessionId).toString(); }
@@ -143,8 +158,15 @@ public class PlatformNavigationBridgeService {
             throw conflict("F4_CONTENT_CHANGED", "F4 正文或轮次已变化，请先恢复最新状态并核对，再保存。");
         }
         if (!(round.get("round_number") instanceof Number number)) throw invalidNative();
+        LessonDocument document = plan.get("structured_content") == null ? null
+                : mapper.convertValue(plan.get("structured_content"), LessonDocument.class);
+        if (document != null) {
+            PlatformLessonDocumentService.validate(document);
+            if (!LessonDocumentProjection.project(document).content().equals(content)
+                    && !("1.0".equals(document.schemaVersion()) && LessonDocumentSupport.renderText(document).equals(content))) throw invalidNative();
+        }
         Snapshot snapshot = new Snapshot(sessionId, text(round.get("id")), number.intValue(),
-                text(session.get("status")), original, content, sha256(content), object(session.get("lesson_metadata")));
+                text(session.get("status")), original, content, sha256(content), object(session.get("lesson_metadata")), document);
         try { return transactions.execute(status -> persist(snapshot, input.expectedVersionId())); }
         catch (DataIntegrityViolationException racingFirstImport) {
             // A simultaneous first import may win the unique session claim. Retry in a fresh transaction.
@@ -174,37 +196,44 @@ public class PlatformNavigationBridgeService {
         }
         Head current = lockHead(binding.lessonId());
         String destinationLesson = binding.lessonId();
+        String structureHash = state.document() == null ? "TEXT_FALLBACK" : documents.structureSha256(state.document());
         List<Saved> saved = db.query("""
                 SELECT w.version_id, v.version_number, w.native_status
-                FROM platform_navigation_writeback w JOIN platform_lesson_version v ON v.id = w.version_id
-                WHERE w.session_id = ? AND w.round_number = ? AND w.content_sha256 = ? FOR UPDATE
+                FROM platform_navigation_snapshot w JOIN platform_lesson_version v ON v.id = w.version_id
+                WHERE w.session_id = ? AND w.round_number = ? AND w.content_sha256 = ? AND w.structure_sha256 = ? FOR UPDATE
                 """, (rs, row) -> new Saved(destinationLesson, rs.getString("version_id"),
-                        rs.getInt("version_number"), true, state.roundNumber(), rs.getString("native_status")),
-                state.sessionId(), state.roundNumber(), state.hash());
+                        rs.getInt("version_number"), true, state.roundNumber(), state.status()),
+                state.sessionId(), state.roundNumber(), state.hash(), structureHash);
         if (!saved.isEmpty()) return saved.get(0);
+        String sourceContent = db.queryForObject("SELECT content FROM platform_lesson_version WHERE id = ?", String.class, binding.sourceVersionId());
+        if (!sourceContent.equals(state.original())) throw conflict("F4_SOURCE_MISMATCH", "F4 输入与已关联来源版本不一致");
+        if (!current.id().equals(binding.sourceVersionId()) && db.queryForObject(
+                "SELECT COUNT(*) FROM platform_navigation_snapshot WHERE session_id = ? AND version_id = ?", Integer.class,
+                state.sessionId(), current.id()) == 0) throw conflict("F4_SOURCE_VERSION_CONFLICT", "当前版本已被其他操作修改，请从新版本重新启动协同分析");
         if (!created && !Objects.equals(current.id(), expectedVersionId)) {
             throw conflict("LESSON_VERSION_CONFLICT", "教案空间已有新版本，请刷新关联信息、核对当前正文后重新保存。");
         }
         String versionId = current.id();
         int versionNumber = current.number();
         Instant now = Instant.now();
-        if (!current.hash().equals(state.hash())) {
-            versionId = Ulids.next(java.time.Clock.systemUTC());
-            versionNumber++;
+        boolean sameStructure = state.document() == null;
+        if (state.document() != null) {
+            try { sameStructure = structureHash.equals(documents.get(binding.lessonId(), current.id()).structureSha256()); }
+            catch (AppException missing) { if (!"LESSON_DOCUMENT_NOT_FOUND".equals(missing.code())) throw missing; }
+        }
+        if (!current.hash().equals(state.hash()) || !sameStructure) {
             String nativeReference = "f4:" + state.sessionId() + ":round:" + state.roundNumber() + ":sha256:" + state.hash();
-            db.update("""
-                    INSERT INTO platform_lesson_version
-                    (id, lesson_id, parent_version_id, version_number, content, content_sha256, source_module, native_reference, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?, 'F4_NAVIGATION', ?, ?)
-                    """, versionId, binding.lessonId(), current.id(), versionNumber, state.content(), state.hash(), nativeReference, Timestamp.from(now));
-            int updated = db.update("UPDATE platform_lesson SET current_version_id = ?, updated_at = ? WHERE id = ? AND current_version_id = ?",
-                    versionId, Timestamp.from(now), binding.lessonId(), current.id());
-            if (updated != 1) throw conflict("LESSON_VERSION_CONFLICT", "教案空间版本已变化，请刷新后核对。");
+            var updated = lessons.addStructuredVersion(binding.lessonId(), current.id(), state.content(),
+                    "F4_NAVIGATION", nativeReference, state.document(), state.document() == null ? "FALLBACK" : "PARSED",
+                    state.document() == null ? "PLAIN_TEXT" : "F4_STRUCTURE", state.document() == null
+                            ? List.of("F4 修订没有可验证的结构，已按实际正文降级保存。") : List.of());
+            versionId = updated.lesson().currentVersionId();
+            versionNumber = updated.versions().stream().mapToInt(PlatformLessonController.LessonVersion::versionNumber).max().orElseThrow();
         }
         db.update("""
-                INSERT INTO platform_navigation_writeback (session_id, round_number, content_sha256, version_id, native_status, created_at)
-                VALUES (?, ?, ?, ?, ?, ?)
-                """, state.sessionId(), state.roundNumber(), state.hash(), versionId, state.status(), Timestamp.from(now));
+                INSERT INTO platform_navigation_snapshot (session_id, round_number, content_sha256, structure_sha256, version_id, native_status, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, state.sessionId(), state.roundNumber(), state.hash(), structureHash, versionId, state.status(), Timestamp.from(now));
         return new Saved(binding.lessonId(), versionId, versionNumber, false, state.roundNumber(), state.status());
     }
 

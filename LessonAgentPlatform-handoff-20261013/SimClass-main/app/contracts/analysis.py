@@ -50,6 +50,7 @@ class AnalysisResult(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     analysis_schema_version: str = Field(default="1.0", alias="analysisSchemaVersion")
+    analysis_status: str = Field(default="COMPLETED", alias="analysisStatus")
     session_id: str = Field(alias="sessionId")
     source_version_id: str = Field(alias="sourceVersionId")
     model_mode: str | None = Field(default=None, alias="modelMode")

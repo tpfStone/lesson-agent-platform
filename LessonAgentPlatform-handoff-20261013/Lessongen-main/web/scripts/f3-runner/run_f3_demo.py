@@ -53,12 +53,15 @@ def load_config(path: str | Path) -> Dict[str, Any]:
         raise ValueError("配置文件顶层必须是 JSON 对象")
 
     normalized: Dict[str, Any] = {
-        "f4Url": _require_nonempty_string(data, "f4Url"),
+        "f4Url": str(data.get("f4Url") or "") if data.get("materials") else _require_nonempty_string(data, "f4Url"),
         "f3Url": _require_nonempty_string(data, "f3Url"),
         "f2Url": str(data.get("f2Url") or "http://127.0.0.1:8080").strip(),
         "lessonId": _require_nonempty_string(data, "lessonId"),
         "versionId": _require_nonempty_string(data, "versionId"),
-        "f4SessionId": _uuid(_require_nonempty_string(data, "f4SessionId"), "f4SessionId"),
+        "f4SessionId": None if data.get("materials") else _uuid(_require_nonempty_string(data, "f4SessionId"), "f4SessionId"),
+        "materials": _normalize_materials(data["materials"]) if data.get("materials") else None,
+        "sourceType": "STRUCTURED_VERSION" if data.get("materials") else "LEGACY_F4",
+        "fallbackReason": data.get("fallbackReason"),
         "outputDir": str(data.get("outputDir") or "outputs/f3_demo").strip(),
         "writebackToF2": data.get("writebackToF2", False),
         "internalToken": str(data.get("internalToken") or "").strip(),
@@ -181,6 +184,11 @@ def _normalize_materials(materials: List[Dict[str, Any]]) -> List[Dict[str, Any]
                 ),
                 "keyPoints": material.get("keyPoints") or material.get("key_points") or [],
                 "metadata": metadata,
+                "durationMinutes": material.get("durationMinutes", material.get("duration_minutes")),
+                "teacherActivity": material.get("teacherActivity", material.get("teacher_activity", "")),
+                "studentActivity": material.get("studentActivity", material.get("student_activity", material.get("student_task", ""))),
+                "evaluation": material.get("evaluation", material.get("evaluation_control", "")),
+                "sourceRef": material.get("sourceRef", material.get("source_ref", {})),
             }
         )
     if not result:
@@ -207,7 +215,8 @@ def start_f3_session(
         "maxEvents": config["maxEvents"],
         "maxWallClockSeconds": config["maxWallClockSeconds"],
         "source": {
-            "module": "F4",
+            "module": config.get("sourceType", "LEGACY_F4"),
+            "fallbackReason": config.get("fallbackReason"),
             "session_id": config["f4SessionId"],
             "lesson_plan_id": f4_lesson_plan_id,
         },
@@ -271,6 +280,11 @@ def poll_completed(session: requests.Session, f3_url: str, session_id: str, max_
         time.sleep(2)
 
     suffix = f"；最后通信错误: {last_transport_error}" if last_transport_error else ""
+    try:
+        stopped = session.post(f"{f3_url.rstrip('/')}/api/classroom/sessions/{session_id}/end", timeout=DEFAULT_TIMEOUT)
+        if not stopped.ok: suffix += '; remote termination unconfirmed'
+    except requests.RequestException:
+        suffix += '; remote termination unconfirmed'
     raise RuntimeError(f"等待 F3 session COMPLETED 超时，最后状态: {last.get('status')}{suffix}")
 
 
@@ -389,6 +403,11 @@ def build_session_record(
         if isinstance(event, dict) and str(event.get("status", "")).upper() == "COMPLETED"
     ]
     result: Dict[str, Any] = {
+        "schemaVersion": "2.1",
+        "executionStatus": status,
+        "analysisStatus": f3_result.get("analysisStatus", "COMPLETED" if _analysis_artifact_ready(f3_result) else "FAILED"),
+        "archiveStatus": "PENDING",
+        "analysisRevision": f3_result.get("analysisRevision", 0),
         "status": status,
         "modelMode": model_mode,
         "startedAt": started_at,
@@ -411,6 +430,13 @@ def build_session_record(
         "actionItems": action_items,
         "analysisWarnings": warnings,
         "session": {
+            **final_state,
+            "sessionId": f3_session_id,
+            "lessonId": lesson_id,
+            "versionId": version_id,
+            "materials": (f3_result.get("session") or {}).get("materials", materials),
+            "startedAt": final_state.get("startedAt") or started_at,
+            "finishedAt": final_state.get("finishedAt") or finished_at,
             "activeRoles": (f3_result.get("session") or {}).get("activeRoles", []),
             "modelMode": model_mode,
             "status": status,
@@ -493,12 +519,15 @@ def run_demo(config: Dict[str, Any], *, http_session: Optional[requests.Session]
 
     session = http_session or requests.Session()
     started_at = _now_iso()
-    check_f4_service(session, config["f4Url"])
     check_f3_service(session, config["f3Url"])
-
-    f4_state = get_f4_current_state(config["f4Url"], config["f4SessionId"], http_session=session)
-    f4_lesson_plan_id = _uuid(str(f4_state["lesson_plan"]["id"]), "f4LessonPlanId")
-    materials = _normalize_materials(build_f3_materials(f4_state))
+    if config.get("materials"):
+        f4_state, f4_lesson_plan_id = {}, None
+        materials = _normalize_materials(config["materials"])
+    else:
+        check_f4_service(session, config["f4Url"])
+        f4_state = get_f4_current_state(config["f4Url"], config["f4SessionId"], http_session=session)
+        f4_lesson_plan_id = _uuid(str(f4_state["lesson_plan"]["id"]), "f4LessonPlanId")
+        materials = _normalize_materials(build_f3_materials(f4_state))
 
     start_data = start_f3_session(session, config, f4_lesson_plan_id, materials)
     f3_session_id = _uuid(str(start_data["sessionId"]), "f3SessionId")
@@ -535,7 +564,8 @@ def run_demo(config: Dict[str, Any], *, http_session: Optional[requests.Session]
                 warnings = []
                 f3_result["analysisWarnings"] = warnings
             warnings.append("总平台读取最终分析时发生短暂异常，已从 F3 终态结果恢复：" + str(exc))
-            failure = None
+            if _analysis_artifact_ready(f3_result):
+                failure = None
 
     record = build_session_record(
         status=status,

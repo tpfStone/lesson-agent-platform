@@ -1,0 +1,35 @@
+# Local repair evidence, dependency environments and backups
+/.repair/
+/.pytest_cache/
+/.codex/
+/.agents/
+
+# Secrets and local settings; keep documented templates
+.env
+.env.*
+!.env.example
+**/.api_key
+*.pem
+*.key
+*credentials*.json
+
+# Build, test and editor outputs
+**/__pycache__/
+**/*.py[cod]
+**/.pytest_cache/
+**/node_modules/
+**/target/
+**/dist/
+**/test-results/
+**/playwright-report/
+**/.venv/
+**/venv/
+**/*.egg-info/
+**/*.log
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# The application subtree also maintains its module-specific ignore rules.
