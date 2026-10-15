@@ -8,14 +8,22 @@ import { useWorkflowStore } from "../stores/workflow";
 const router = useRouter();
 const workflow = useWorkflowStore();
 
-const isWorkflowStep = computed(
-  () => Boolean(workflow.activeRun && !workflow.isFinished && workflow.currentStep?.id === "F2"),
+const isWorkflowStep = computed(() =>
+  Boolean(
+    workflow.activeRun &&
+    !workflow.isFinished &&
+    workflow.currentStep?.id === "F2",
+  ),
 );
-const workflowHasLesson = computed(
-  () => Boolean(isWorkflowStep.value && workflow.activeRun?.lessonId && workflow.activeRun?.versionId),
+const workflowHasLesson = computed(() =>
+  Boolean(
+    isWorkflowStep.value &&
+    workflow.activeRun?.lessonId &&
+    workflow.activeRun?.versionId,
+  ),
 );
-const isLaterWorkflowStep = computed(
-  () => Boolean(isWorkflowStep.value && (workflow.activeRun?.currentIndex ?? 0) > 0),
+const isLaterWorkflowStep = computed(() =>
+  Boolean(isWorkflowStep.value && (workflow.activeRun?.currentIndex ?? 0) > 0),
 );
 
 function optimizeQuery() {
@@ -34,7 +42,10 @@ function enterOptimize() {
 }
 
 function enterGenerate() {
-  void router.push({ path: "/create/generate", query: isWorkflowStep.value ? { workflow: "1" } : {} });
+  void router.push({
+    path: "/create/generate",
+    query: isWorkflowStep.value ? { workflow: "1" } : {},
+  });
 }
 
 onMounted(() => {
@@ -74,7 +85,13 @@ onMounted(() => {
           <h2>选择 / 上传教案</h2>
           <p>从“我的教案”选择版本，或上传 DOCX，再进入教案优化设置。</p>
         </div>
-        <button type="button" class="v2-button v2-button--primary" @click="enterOptimize">进入教案优化</button>
+        <button
+          type="button"
+          class="v2-button v2-button--primary"
+          @click="enterOptimize"
+        >
+          进入教案优化
+        </button>
       </BaseCard>
 
       <BaseCard as="article" class="choice-card">
@@ -84,7 +101,13 @@ onMounted(() => {
           <h2>生成教案</h2>
           <p>填写学科、年级与教学主题，从零生成一份新的教学设计。</p>
         </div>
-        <button type="button" class="v2-button v2-button--secondary" @click="enterGenerate">开始生成</button>
+        <button
+          type="button"
+          class="v2-button v2-button--secondary"
+          @click="enterGenerate"
+        >
+          开始生成
+        </button>
       </BaseCard>
     </section>
 
@@ -95,13 +118,69 @@ onMounted(() => {
 </template>
 
 <style scoped>
-.design-entry{display:grid;gap:var(--space-6);color:var(--color-text)}
-.choice-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--space-5)}
-.choice-card{min-height:244px;display:grid;grid-template-rows:auto 1fr auto;gap:18px;padding:28px}
-.choice-icon{width:44px;height:44px;display:grid;place-items:center;border-radius:var(--radius-md);color:var(--color-primary);background:var(--color-primary-soft);font-weight:800}
-.choice-label{margin:0 0 6px;color:var(--color-primary);font-size:12px;font-weight:700}
-.choice-copy h2{margin:0;color:var(--color-text);font-size:22px}.choice-copy>p:last-child{margin:10px 0 0;color:var(--color-text-secondary);line-height:1.75}
-.choice-card .v2-button{justify-self:start;min-width:132px}
-.workflow-note{margin:0;padding:14px 16px;border:1px solid var(--color-primary-border);border-radius:var(--radius-md);color:var(--color-text-secondary);background:var(--color-primary-soft);font-size:13px;line-height:1.7}
-@media(max-width:760px){.choice-grid{grid-template-columns:1fr}.choice-card{min-height:220px}}
+.design-entry {
+  display: grid;
+  gap: var(--space-6);
+  color: var(--color-text);
+}
+.choice-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-5);
+}
+.choice-card {
+  min-height: 244px;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  gap: 18px;
+  padding: 28px;
+}
+.choice-icon {
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-md);
+  color: var(--color-primary);
+  background: var(--color-primary-soft);
+  font-weight: 800;
+}
+.choice-label {
+  margin: 0 0 6px;
+  color: var(--color-primary);
+  font-size: 12px;
+  font-weight: 700;
+}
+.choice-copy h2 {
+  margin: 0;
+  color: var(--color-text);
+  font-size: 22px;
+}
+.choice-copy > p:last-child {
+  margin: 10px 0 0;
+  color: var(--color-text-secondary);
+  line-height: 1.75;
+}
+.choice-card .v2-button {
+  justify-self: start;
+  min-width: 132px;
+}
+.workflow-note {
+  margin: 0;
+  padding: 14px 16px;
+  border: 1px solid var(--color-primary-border);
+  border-radius: var(--radius-md);
+  color: var(--color-text-secondary);
+  background: var(--color-primary-soft);
+  font-size: 13px;
+  line-height: 1.7;
+}
+@media (max-width: 760px) {
+  .choice-grid {
+    grid-template-columns: 1fr;
+  }
+  .choice-card {
+    min-height: 220px;
+  }
+}
 </style>

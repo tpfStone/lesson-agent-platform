@@ -30,6 +30,44 @@ def test_concurrency_is_bounded(tmp_path, monkeypatch):
         service.create_session(request(requestKey='second'))
 
 
+@pytest.mark.parametrize('auto_start', [False, True])
+def test_creation_persist_failure_allows_durable_retry_and_restart(tmp_path, monkeypatch, auto_start):
+    import json
+    from pathlib import Path
+    service = ClassroomService(storage_root=tmp_path, auto_start=auto_start)
+    started = []
+    # Exercise real start_session and its worker startup without running a model turn.
+    monkeypatch.setattr(service, '_run_session', lambda runtime: started.append(runtime.session_id))
+    replace = Path.replace
+    fail_once = True
+    def interrupted_publish(source, target):
+        nonlocal fail_once
+        if Path(target).name == 'session.json' and fail_once:
+            fail_once = False
+            raise OSError('injected session publication failure')
+        return replace(source, target)
+    monkeypatch.setattr(Path, 'replace', interrupted_publish)
+    with pytest.raises(OSError, match='publication failure'):
+        service.create_session(request())
+    assert started == []
+
+    retried, reused = service.create_session(request())
+    session_id = retried['sessionId']
+    path = tmp_path / session_id / 'session.json'
+    assert path.is_file(), 'A successful retry must publish durable session state'
+    assert json.loads(path.read_text(encoding='utf-8'))['sessionId'] == session_id
+    if auto_start:
+        service._sessions[session_id].thread.join(timeout=2)
+    assert started == ([session_id] if auto_start else [])
+    assert service.create_session(request())[0]['sessionId'] == session_id
+    assert started == ([session_id] if auto_start else [])
+
+    restarted = ClassroomService(storage_root=tmp_path, auto_start=False)
+    restored, reused = restarted.create_session(request())
+    assert reused and restored['sessionId'] == session_id
+    assert restored['stopReason'] == 'SERVICE_RESTART_UNRECOVERABLE'
+
+
 def test_missing_request_cancellation_fences_late_runner_after_restart(tmp_path):
     service = ClassroomService(storage_root=tmp_path, auto_start=False)
     assert service.cancel_request_if_absent('key')['status'] == 'NOT_CREATED'

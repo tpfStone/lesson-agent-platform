@@ -194,3 +194,32 @@ Get-Content .\.runtime\logs\spring.err.log -Tail 100
 
 不要通过删除 MySQL 数据库或 Flyway 历史表解决 migration 错误。
 
+## 12. 本机已准备环境（2026-10-15）
+
+当前机器已完成安装，项目实际位置为 `D:\projects\LessonAgentPlatform\LessonAgentPlatform-handoff-20261013`。四个 Python 模块使用各自 Python 3.11.15 `.venv`；Java JAR 和前端构建已具备。不要再次复制 `.env.example` 覆盖已填写的 `.env`。
+
+准备完成时六个服务保持运行，打开 `http://127.0.0.1:5177`，在页面注册自己的账号即可使用。2026-10-15 已完成最小生成和四模块真实业务试跑；F1 评价、F4 一轮共析写回已有通过证据，F2 返回需要人工复核且未达到质量门槛，F3 课堂完成、问题分析曾分段超时后已恢复为 `COMPLETED`。完整结论以 [验收报告](ACCEPTANCE_RESULTS_20261015.md) 的最新记录为准。本地健康检查本身不代表业务验收通过。
+
+真实业务测试补齐了 SOCKS 代理依赖：F1 的 `socksio`、F2/F3/F4 的 `httpx[socks]` 已写入依赖声明；F2 的基础运行依赖和 `requirements.txt` 均覆盖，不依赖安装 `dev` extra。本机四个虚拟环境已补装并通过无网络客户端初始化检查。
+
+Windows 重定向 Python 日志时，GBK 不能编码 emoji，可能让课堂线程中断。根 `.env` 和 `.env.example` 已设置 `PYTHONUTF8=1`、`PYTHONIOENCODING=utf-8`、`PYTHONUNBUFFERED=1`；已有环境需保留这三项，修改后重启服务。停止脚本若报告权限不足或进程仍存活，会返回非零并保留 PID 记录；应在有权停止该进程的终端重试，不手动删除记录冒充停止成功。
+
+日后重新启动，先开启 Docker Desktop，再执行：
+
+```powershell
+cd D:\projects\LessonAgentPlatform\LessonAgentPlatform-handoff-20261013
+docker start lessonagent-local-mysql
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-all.ps1
+```
+
+检查及停止应用：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\health-check.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\stop-all.ps1
+```
+
+停止数据库可执行 `docker stop lessonagent-local-mysql`，保留数据卷 `lessonagent-local-mysql-data`。数据库仅在 `127.0.0.1:3308` 提供服务，原有 `3307` 数据库独立保留。
+
+PDF 转换器位于 `.runtime/tools/LibreOffice/program/soffice.exe`，路径已配置到 `.env`。`.runtime` 还保存本地数据库配置、服务日志、PID 和验收账户信息，不能整体删除或公开上传。迁移到其他目录/机器时，需重建 `.venv` 并重新配置本机绝对路径，不要直接复制本机虚拟环境。
+

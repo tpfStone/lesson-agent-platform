@@ -201,10 +201,12 @@ class ClassroomService:
                 event_store=EventStore(self.storage_root, session_id),
                 request_fingerprint=fingerprint,
             )
+            # Publish the idempotency entry only after durable creation succeeds.
+            # Otherwise a failed write makes the retry bypass persistence and startup.
+            self._persist_session(runtime)
             self._sessions[session_id] = runtime
             self._archive_analysis_locks[session_id] = runtime.analysis_lock
             self._request_keys[request.request_key] = session_id
-            self._persist_session(runtime)
 
         if self.auto_start:
             self.start_session(session_id)

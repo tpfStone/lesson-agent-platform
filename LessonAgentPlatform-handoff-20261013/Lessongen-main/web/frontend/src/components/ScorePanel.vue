@@ -130,17 +130,53 @@ onBeforeUnmount(() => observer?.disconnect());
 </template>
 
 <style scoped>
-.score-panel{padding:22px;border-color:var(--color-border);background:#fff}
-.score-panel .eyebrow{color:var(--color-primary);font-size:12px;font-weight:800;letter-spacing:0}
-.score-panel h2{margin:5px 0 0;color:var(--color-text);font-size:20px}
-.overall-score{color:var(--color-primary)}
-.score-notice{color:var(--color-text-secondary)}
-.score-list div{border-bottom-color:var(--color-border)}
-.score-list dt{color:var(--color-text-secondary)}
-.score-list dd{color:var(--color-text);font-family:inherit}
-.score-panel :deep(.radar-grid polygon),.score-panel :deep(.radar-grid line){stroke:#d8e2f1}
-.score-panel :deep(.radar-grid polygon:nth-child(even)){fill:rgba(234,241,255,.48)}
-.score-panel :deep(.radar-value-shape){fill:rgba(37,99,217,.16);stroke:var(--color-primary)}
-.score-panel :deep(.radar-value-dot){fill:var(--color-primary)}
-.score-panel :deep(text){fill:var(--color-text-secondary)}
+.score-panel {
+  padding: 22px;
+  border-color: var(--color-border);
+  background: #fff;
+}
+.score-panel .eyebrow {
+  color: var(--color-primary);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0;
+}
+.score-panel h2 {
+  margin: 5px 0 0;
+  color: var(--color-text);
+  font-size: 20px;
+}
+.overall-score {
+  color: var(--color-primary);
+}
+.score-notice {
+  color: var(--color-text-secondary);
+}
+.score-list div {
+  border-bottom-color: var(--color-border);
+}
+.score-list dt {
+  color: var(--color-text-secondary);
+}
+.score-list dd {
+  color: var(--color-text);
+  font-family: inherit;
+}
+.score-panel :deep(.radar-grid polygon),
+.score-panel :deep(.radar-grid line) {
+  stroke: #d8e2f1;
+}
+.score-panel :deep(.radar-grid polygon:nth-child(even)) {
+  fill: rgba(234, 241, 255, 0.48);
+}
+.score-panel :deep(.radar-value-shape) {
+  fill: rgba(37, 99, 217, 0.16);
+  stroke: var(--color-primary);
+}
+.score-panel :deep(.radar-value-dot) {
+  fill: var(--color-primary);
+}
+.score-panel :deep(text) {
+  fill: var(--color-text-secondary);
+}
 </style>

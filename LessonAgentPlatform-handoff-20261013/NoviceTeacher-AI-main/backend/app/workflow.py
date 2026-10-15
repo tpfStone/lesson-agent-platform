@@ -88,6 +88,11 @@ class Workflow:
         if existing:
             if existing.input_hash != fingerprint:
                 raise WorkflowError('此提交编号已经用于不同教案。请新建提交。')
+            # Plaintext sessions historically hashed content and metadata only.
+            # Compare persisted provenance as well without invalidating old hashes.
+            lesson = self.one(m.LessonPlan, session_id=existing.id)
+            if lesson.source_binding != data.source_binding:
+                raise WorkflowError('此提交编号已经用于不同来源版本。请新建提交。')
             return existing
         if not data.content.strip():
             raise WorkflowError('教案不能为空。', 422)

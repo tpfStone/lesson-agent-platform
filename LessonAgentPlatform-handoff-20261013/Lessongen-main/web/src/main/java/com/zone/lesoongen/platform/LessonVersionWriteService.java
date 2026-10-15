@@ -51,10 +51,16 @@ public class LessonVersionWriteService {
         String key = command.operationKey() == null ? null : command.lessonId() + ":" + command.operationKey();
         if (key != null) {
             var previous = db.queryForList("SELECT request_fingerprint, version_id FROM platform_version_operation WHERE operation_key = ?", key);
+            // A prior owner lookup can establish an old MySQL REPEATABLE READ
+            // snapshot. Only a changed head needs a current read to find a retry.
+            // Never carry a missing-key gap lock into a new operation INSERT.
+            if (previous.isEmpty() && !Objects.equals(head, command.expectedCurrentVersionId())) {
+                previous = db.queryForList("SELECT request_fingerprint, version_id FROM platform_version_operation WHERE operation_key = ? FOR UPDATE", key);
+            }
             if (!previous.isEmpty()) {
                 if (!Objects.equals(command.requestFingerprint(), previous.get(0).get("request_fingerprint"))) throw conflict("同一操作编号对应不同内容");
                 String versionId = (String) previous.get(0).get("version_id");
-                return new Written(command.lessonId(), versionId, db.queryForObject("SELECT version_number FROM platform_lesson_version WHERE id = ?", Integer.class, versionId), true);
+                return new Written(command.lessonId(), versionId, db.queryForObject("SELECT version_number FROM platform_lesson_version WHERE id = ? FOR UPDATE", Integer.class, versionId), true);
             }
         }
         if (!Objects.equals(head, command.expectedCurrentVersionId())) throw conflict("教案已被修改，请刷新后重新确认当前版本");

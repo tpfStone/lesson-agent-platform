@@ -23,7 +23,12 @@ for ($attempt = 1; $attempt -le [Math]::Max(1, $Retries); $attempt++) {
             $response = Invoke-WebRequest -Uri $service.Url -UseBasicParsing -TimeoutSec 5
             $ready = $true
             if ($service.Name -ne 'Frontend') {
-                $body = $response.Content | ConvertFrom-Json
+                $content = $response.Content
+                # Windows PowerShell treats application/*+json as binary content.
+                if ($content -is [byte[]]) {
+                    $content = [System.Text.Encoding]::UTF8.GetString($content)
+                }
+                $body = $content | ConvertFrom-Json -ErrorAction Stop
                 if ($body.status -notin @('up', 'UP', 'ok')) { $ready = $false }
                 if ($body.PSObject.Properties.Name -contains 'model_configured' -and -not $body.model_configured) { $ready = $false }
                 if ($body.PSObject.Properties.Name -contains 'ready' -and -not $body.ready) { $ready = $false }

@@ -21,13 +21,21 @@ axios.interceptors.request.use((config) => {
 
   return config;
 });
-axios.interceptors.response.use(response => {
-  if (requestEpochs.get(response.config) !== privateContextEpoch()) throw new axios.CanceledError("用户上下文已改变");
-  return response;
-}, error => {
-  if (error.config && requestEpochs.get(error.config) !== privateContextEpoch()) return Promise.reject(new axios.CanceledError("用户上下文已改变"));
-  return Promise.reject(error);
-});
+axios.interceptors.response.use(
+  (response) => {
+    if (requestEpochs.get(response.config) !== privateContextEpoch())
+      throw new axios.CanceledError("用户上下文已改变");
+    return response;
+  },
+  (error) => {
+    if (
+      error.config &&
+      requestEpochs.get(error.config) !== privateContextEpoch()
+    )
+      return Promise.reject(new axios.CanceledError("用户上下文已改变"));
+    return Promise.reject(error);
+  },
+);
 
 const pinia = createPinia();
 const auth = useAuthStore(pinia);
@@ -35,14 +43,15 @@ const auth = useAuthStore(pinia);
 router.beforeEach(async (to) => {
   await auth.restore();
   if (to.meta.public) {
-    if (auth.user && (to.name === "login" || to.name === "register")) return "/";
+    if (auth.user && (to.name === "login" || to.name === "register"))
+      return "/";
     return true;
   }
   if (!auth.user) {
     return { name: "login", query: { redirect: to.fullPath } };
   }
   if (to.meta.admin && auth.user.role !== "ADMIN") return "/";
-  
+
   return true;
 });
 

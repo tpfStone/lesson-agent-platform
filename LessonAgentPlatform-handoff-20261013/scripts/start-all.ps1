@@ -116,8 +116,24 @@ function Start-LoggedProcess {
         -RedirectStandardOutput $out `
         -RedirectStandardError $err `
         -WindowStyle Hidden -PassThru
-    $pids[$Name] = Get-ServiceIdentity $process $LaunchId
-    Save-Pids
+    try {
+        $pids[$Name] = Get-ServiceIdentity $process $LaunchId
+        Save-Pids
+    } catch {
+        $launchError = $_
+        # Keep the original process handle: this child has no durable PID record yet.
+        if (-not $process.HasExited) {
+            try {
+                & taskkill.exe /PID $process.Id /T /F | Out-Null
+                if ($LASTEXITCODE -ne 0) {
+                    Write-Warning "Startup cleanup failed for PID=$($process.Id); inspect this process."
+                }
+            } catch {
+                Write-Warning "Startup cleanup failed for PID=$($process.Id): $($_.Exception.Message)"
+            }
+        }
+        throw $launchError
+    }
     Write-Host ("Started {0,-10} PID={1}" -f $Name, $process.Id)
 }
 

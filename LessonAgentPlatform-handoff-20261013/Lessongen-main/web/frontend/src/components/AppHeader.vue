@@ -23,7 +23,11 @@ const links = [
           v-for="link in links"
           :key="link.to"
           :to="link.to"
-          :class="{ active: route.path === link.to || (link.to === '/lessons' && route.path.startsWith('/lessons/')) }"
+          :class="{
+            active:
+              route.path === link.to ||
+              (link.to === '/lessons' && route.path.startsWith('/lessons/')),
+          }"
           >{{ link.label }}</RouterLink
         >
       </nav>

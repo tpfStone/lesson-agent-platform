@@ -78,7 +78,9 @@ const level = computed(() =>
     </ul>
     <div class="cost-note">
       <strong>任务说明</strong
-      ><span>提交后任务会在后台继续运行；离开页面不会中断，可从任务记录返回查看。</span>
+      ><span
+        >提交后任务会在后台继续运行；离开页面不会中断，可从任务记录返回查看。</span
+      >
     </div>
   </aside>
 </template>

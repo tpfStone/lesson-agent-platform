@@ -11,7 +11,5 @@ export function clearCsrfToken(): void {
 }
 
 export function csrfHeaders(): Record<string, string> {
-  return currentToken
-    ? { [currentHeaderName]: currentToken }
-    : {};
+  return currentToken ? { [currentHeaderName]: currentToken } : {};
 }

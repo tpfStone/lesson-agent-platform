@@ -40,22 +40,19 @@ public class PlatformLessonDocumentService {
         String documentJson = json(document);
         String warningsJson = json(warnings == null ? List.of() : warnings);
         Instant now = Instant.now().truncatedTo(ChronoUnit.MICROS);
-        int updated = db.update("""
-                UPDATE platform_lesson_version_structure
-                SET schema_version = ?, structured_content = ?, parse_status = ?, parser_name = ?,
-                    parser_version = ?, warnings = ?, updated_at = ?
-                WHERE version_id = ?
-                """, document.schemaVersion(), documentJson, parseStatus, parserName,
-                parserVersion, warningsJson, Timestamp.from(now), versionId);
-        if (updated == 0) {
-            db.update("""
-                    INSERT INTO platform_lesson_version_structure
-                    (version_id, schema_version, structured_content, parse_status, parser_name,
-                     parser_version, warnings, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """, versionId, document.schemaVersion(), documentJson, parseStatus, parserName,
-                    parserVersion, warningsJson, Timestamp.from(now), Timestamp.from(now));
-        }
+        // UPDATE of a missing MySQL key takes a gap lock. Two new versions
+        // could then deadlock on INSERT despite locking different parent rows.
+        db.update("""
+                INSERT INTO platform_lesson_version_structure
+                (version_id, schema_version, structured_content, parse_status, parser_name,
+                 parser_version, warnings, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON DUPLICATE KEY UPDATE schema_version = ?, structured_content = ?,
+                    parse_status = ?, parser_name = ?, parser_version = ?, warnings = ?, updated_at = ?
+                """, versionId, document.schemaVersion(), documentJson, parseStatus, parserName,
+                parserVersion, warningsJson, Timestamp.from(now), Timestamp.from(now),
+                document.schemaVersion(), documentJson, parseStatus, parserName,
+                parserVersion, warningsJson, Timestamp.from(now));
         db.update("""
                 UPDATE platform_lesson_version_structure SET content_sha256 = ?, structure_sha256 = ?,
                     projection_version = ?, binding_status = ? WHERE version_id = ?

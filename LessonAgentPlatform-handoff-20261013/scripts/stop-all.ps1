@@ -15,6 +15,7 @@ $saved = Get-Content -LiteralPath $PidFile -Raw | ConvertFrom-Json
 $properties = @($saved.PSObject.Properties)
 [Array]::Reverse($properties)
 $unverified = $false
+$stopFailed = $false
 foreach ($property in $properties) {
     $name = $property.Name
     $entry = $property.Value
@@ -28,13 +29,22 @@ foreach ($property in $properties) {
     }
     if ($process) {
         Write-Host "Stopping $name PID=$processId"
-        & taskkill.exe /PID $processId /T /F | Out-Null
+        try {
+            & taskkill.exe /PID $processId /T /F | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw "taskkill exited with code $LASTEXITCODE" }
+            $process.Refresh()
+            if (-not $process.HasExited) { throw 'Process is still running.' }
+        } catch {
+            Write-Warning "Could not stop $name PID=$processId`: $($_.Exception.Message)"
+            $stopFailed = $true
+        }
     } else {
         Write-Host "$name PID=$processId is already stopped"
     }
 }
 
 if ($unverified) { Write-Warning 'Unverified entries retained for inspection.'; exit 1 }
+if ($stopFailed) { Write-Warning 'Stop failed; PID identities retained for retry.'; exit 1 }
 Remove-Item -LiteralPath $PidFile -Force
 Write-Host 'All recorded services have been stopped.'
 

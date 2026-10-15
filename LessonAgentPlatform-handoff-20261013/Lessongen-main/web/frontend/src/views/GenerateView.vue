@@ -116,8 +116,12 @@ async function submit() {
     const accepted = await createGenerate(drafts.generate, key.value);
     submitted = true;
     drafts.clearGenerate();
-    const inWorkflow = new URLSearchParams(window.location.search).get("workflow") === "1";
-    await router.push({ path: `/jobs/${accepted.jobId}`, query: inWorkflow ? { workflow: "1" } : {} });
+    const inWorkflow =
+      new URLSearchParams(window.location.search).get("workflow") === "1";
+    await router.push({
+      path: `/jobs/${accepted.jobId}`,
+      query: inWorkflow ? { workflow: "1" } : {},
+    });
   } catch (reason) {
     error.value =
       reason instanceof ApiProblem ? reason.message : "提交失败，请稍后重试。";
@@ -128,62 +132,127 @@ async function submit() {
 </script>
 <template>
   <main class="generate-workspace">
-  <AppPageHeader
-    title="教案生成"
-    description="填写基本信息与教学依据，生成一份可继续修改和使用的教案。三项必填信息齐全后即可开始。"
-  />
-  <FormWayfinder
-    :items="sections"
-    :note="submitting ? '正在提交任务，请勿重复操作。' : draftNote"
-  />
-  <div class="form-layout">
-    <EvidenceMeter class="mobile-evidence" :value="drafts.generate" compact />
-    <form class="lesson-form surface" novalidate @submit.prevent="submit">
-      <LessonFields
-        ref="lessonFields"
-        v-model="drafts.generate"
-        id-prefix="generate"
-        :invalid-field="invalidField"
-        compact
-      />
-      <div
-        v-if="error"
-        id="generate-form-error"
-        class="form-error"
-        role="alert"
-      >
-        {{ error }}
-      </div>
-      <div class="submit-row">
-        <p>
-          <strong>准备好后开始生成</strong>
-          <span>任务会在后台持续运行，离开页面不会中断。</span>
-        </p>
-        <button class="v2-button v2-button--primary" type="submit" :disabled="submitting">
-          <span v-if="submitting" class="button-spinner" />{{
-            submitting ? "正在创建任务…" : "开始生成教案"
-          }}
-        </button>
-      </div>
-    </form>
-    <EvidenceMeter class="desktop-evidence" :value="drafts.generate" />
-  </div>
+    <AppPageHeader
+      title="教案生成"
+      description="填写基本信息与教学依据，生成一份可继续修改和使用的教案。三项必填信息齐全后即可开始。"
+    />
+    <FormWayfinder
+      :items="sections"
+      :note="submitting ? '正在提交任务，请勿重复操作。' : draftNote"
+    />
+    <div class="form-layout">
+      <EvidenceMeter class="mobile-evidence" :value="drafts.generate" compact />
+      <form class="lesson-form surface" novalidate @submit.prevent="submit">
+        <LessonFields
+          ref="lessonFields"
+          v-model="drafts.generate"
+          id-prefix="generate"
+          :invalid-field="invalidField"
+          compact
+        />
+        <div
+          v-if="error"
+          id="generate-form-error"
+          class="form-error"
+          role="alert"
+        >
+          {{ error }}
+        </div>
+        <div class="submit-row">
+          <p>
+            <strong>准备好后开始生成</strong>
+            <span>任务会在后台持续运行，离开页面不会中断。</span>
+          </p>
+          <button
+            class="v2-button v2-button--primary"
+            type="submit"
+            :disabled="submitting"
+          >
+            <span v-if="submitting" class="button-spinner" />{{
+              submitting ? "正在创建任务…" : "开始生成教案"
+            }}
+          </button>
+        </div>
+      </form>
+      <EvidenceMeter class="desktop-evidence" :value="drafts.generate" />
+    </div>
   </main>
 </template>
 
 <style scoped>
-.generate-workspace { display:grid; gap:var(--space-6); color:var(--color-text); }
-.generate-workspace :deep(.wayfinder-wrap) { top:0; z-index:25; margin-inline:-1px; padding:10px 12px 8px; border:1px solid #dce5f2; border-radius:0 0 12px 12px; background:#fff; box-shadow:0 8px 20px rgba(23,43,72,.07); backdrop-filter:none; }
-.generate-workspace :deep(.lesson-form),.generate-workspace :deep(.evidence-card) { border-color:#dce5f2; background:#fff; }
-.generate-workspace :deep(.evidence-card) { background:#f5f8ff; }
-.generate-workspace :deep(.lesson-form input),.generate-workspace :deep(.lesson-form textarea),.generate-workspace :deep(.lesson-form select),.generate-workspace :deep(.chip-editor) { border-color:#cbd8ea; }
-.generate-workspace :deep(.form-section),.generate-workspace :deep(.advanced-fields) { border-color:#e4ebf6; }
-.generate-workspace :deep(.form-section-title > span),.generate-workspace :deep(.advanced-fields summary > span),.generate-workspace :deep(.chip),.generate-workspace :deep(.evidence-count) { color:var(--color-primary); background:var(--color-primary-soft); }
-.generate-workspace :deep(.chip-add button) { color:var(--color-primary); background:#edf4ff; }
-.generate-workspace :deep(.lesson-form input:hover),.generate-workspace :deep(.lesson-form textarea:hover),.generate-workspace :deep(.lesson-form select:hover),.generate-workspace :deep(.chip-editor:hover) { border-color:#9eb7e5; }
-.generate-workspace :deep(.lesson-form input:focus),.generate-workspace :deep(.lesson-form textarea:focus),.generate-workspace :deep(.lesson-form select:focus),.generate-workspace :deep(.chip-add input:focus) { border-color:var(--color-primary); box-shadow:0 0 0 3px var(--color-primary-soft); }
-.generate-workspace :deep(.advanced-fields summary > i),.generate-workspace :deep(.eyebrow),.generate-workspace :deep(.ready span) { color:var(--color-primary); }
-.generate-workspace :deep(.meter i) { background:var(--color-primary); }
-.generate-workspace :deep(.submit-row) { background:#f5f8ff; border-color:#dce5f2; }
-@media(max-width:760px) { .generate-workspace :deep(.wayfinder-wrap) { top:0; } }
+.generate-workspace {
+  display: grid;
+  gap: var(--space-6);
+  color: var(--color-text);
+}
+.generate-workspace :deep(.wayfinder-wrap) {
+  top: 0;
+  z-index: 25;
+  margin-inline: -1px;
+  padding: 10px 12px 8px;
+  border: 1px solid #dce5f2;
+  border-radius: 0 0 12px 12px;
+  background: #fff;
+  box-shadow: 0 8px 20px rgba(23, 43, 72, 0.07);
+  backdrop-filter: none;
+}
+.generate-workspace :deep(.lesson-form),
+.generate-workspace :deep(.evidence-card) {
+  border-color: #dce5f2;
+  background: #fff;
+}
+.generate-workspace :deep(.evidence-card) {
+  background: #f5f8ff;
+}
+.generate-workspace :deep(.lesson-form input),
+.generate-workspace :deep(.lesson-form textarea),
+.generate-workspace :deep(.lesson-form select),
+.generate-workspace :deep(.chip-editor) {
+  border-color: #cbd8ea;
+}
+.generate-workspace :deep(.form-section),
+.generate-workspace :deep(.advanced-fields) {
+  border-color: #e4ebf6;
+}
+.generate-workspace :deep(.form-section-title > span),
+.generate-workspace :deep(.advanced-fields summary > span),
+.generate-workspace :deep(.chip),
+.generate-workspace :deep(.evidence-count) {
+  color: var(--color-primary);
+  background: var(--color-primary-soft);
+}
+.generate-workspace :deep(.chip-add button) {
+  color: var(--color-primary);
+  background: #edf4ff;
+}
+.generate-workspace :deep(.lesson-form input:hover),
+.generate-workspace :deep(.lesson-form textarea:hover),
+.generate-workspace :deep(.lesson-form select:hover),
+.generate-workspace :deep(.chip-editor:hover) {
+  border-color: #9eb7e5;
+}
+.generate-workspace :deep(.lesson-form input:focus),
+.generate-workspace :deep(.lesson-form textarea:focus),
+.generate-workspace :deep(.lesson-form select:focus),
+.generate-workspace :deep(.chip-add input:focus) {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px var(--color-primary-soft);
+}
+.generate-workspace :deep(.advanced-fields summary > i),
+.generate-workspace :deep(.eyebrow),
+.generate-workspace :deep(.ready span) {
+  color: var(--color-primary);
+}
+.generate-workspace :deep(.meter i) {
+  background: var(--color-primary);
+}
+.generate-workspace :deep(.submit-row) {
+  background: #f5f8ff;
+  border-color: #dce5f2;
+}
+@media (max-width: 760px) {
+  .generate-workspace :deep(.wayfinder-wrap) {
+    top: 0;
+  }
+}
 </style>

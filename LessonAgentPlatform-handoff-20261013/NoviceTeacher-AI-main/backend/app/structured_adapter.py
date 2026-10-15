@@ -37,25 +37,45 @@ def validate(document):
         raise ValueError('INVALID_BLOCKS')
     ids, row_ids = set(), set()
     for block in blocks:
+        if not isinstance(block, dict):
+            raise ValueError('INVALID_BLOCK')
         key = block.get('id')
-        if not key or key in ids: raise ValueError('DUPLICATE_OR_EMPTY_BLOCK_ID')
+        if not isinstance(key, str) or not key or key in ids: raise ValueError('DUPLICATE_OR_EMPTY_BLOCK_ID')
         ids.add(key)
-        rows = block.get('tableRows') or []
-        if rows and (len(rows) > 5000 or any(not isinstance(row, list) or len(row) > 100 for row in rows)):
+        if block.get('text') is not None and not isinstance(block['text'], str):
+            raise ValueError('INVALID_TEXT')
+        if block.get('items') is not None and (not isinstance(block['items'], list)
+                or any(not isinstance(item, str) for item in block['items'])):
+            raise ValueError('INVALID_ITEMS')
+        if block.get('tableRows') is not None and not isinstance(block['tableRows'], list):
             raise ValueError('INVALID_TABLE')
+        rows = block.get('tableRows') or []
+        if rows and (len(rows) > 5000 or any(not isinstance(row, list) or len(row) > 100
+                or any(not isinstance(cell, str) for cell in row) for row in rows)):
+            raise ValueError('INVALID_TABLE')
+        if block.get('rowIds') is not None and not isinstance(block['rowIds'], list):
+            raise ValueError('INVALID_ROW_IDS')
         rids = block.get('rowIds') or []
         if rows and document.get('schemaVersion') == '1.1' and not rids: raise ValueError('ROW_IDS_REQUIRED')
         if rids and len(rids) != len(rows): raise ValueError('ROW_ID_COUNT_MISMATCH')
         for rid in rids:
-            if not rid or rid in row_ids: raise ValueError('DUPLICATE_ROW_ID')
+            if not isinstance(rid, str) or not rid or rid in row_ids: raise ValueError('DUPLICATE_ROW_ID')
             row_ids.add(rid)
+        if block.get('columnBindings') is not None and not isinstance(block['columnBindings'], dict):
+            raise ValueError('INVALID_COLUMN_BINDING')
         for index in (block.get('columnBindings') or {}).values():
-            if not isinstance(index, int) or index < 0 or any(index >= len(row) for row in rows):
+            if type(index) is not int or index < 0 or any(index >= len(row) for row in rows):
                 raise ValueError('INVALID_COLUMN_BINDING')
+        teaching = block.get('teachingProcess')
+        if teaching is not None and (not isinstance(teaching, dict)
+                or not isinstance(teaching.get('rows', []), list)):
+            raise ValueError('INVALID_TEACHING_PROCESS')
         used = set()
         for row in (block.get('teachingProcess') or {}).get('rows', []):
+            if not isinstance(row, dict):
+                raise ValueError('INVALID_SOURCE_ROW')
             index = row.get('sourceRowIndex')
-            if not isinstance(index, int) or index < 0 or index >= len(rows) or index in used:
+            if type(index) is not int or index < 0 or index >= len(rows) or index in used:
                 raise ValueError('INVALID_SOURCE_ROW')
             used.add(index)
             if rids and row.get('rowId') != rids[index]: raise ValueError('ROW_REFERENCE_MISMATCH')
