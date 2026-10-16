@@ -32,6 +32,7 @@ export const useDraftStore = defineStore("draft", {
     optimize: load<OptimizeInput>("lesoongen.optimize-draft", {
       ...base(),
       optimizationFocus: [],
+      optimizationScope: { mode: "local", editablePaths: ["/procedure_steps"] },
       mustPreserveContent: [],
     }),
   }),
@@ -70,6 +71,10 @@ export const useDraftStore = defineStore("draft", {
       this.optimize = {
         ...base(),
         optimizationFocus: [],
+        optimizationScope: {
+          mode: "local",
+          editablePaths: ["/procedure_steps"],
+        },
         mustPreserveContent: [],
       };
       try {

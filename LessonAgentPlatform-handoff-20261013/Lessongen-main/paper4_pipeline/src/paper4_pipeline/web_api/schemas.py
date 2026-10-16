@@ -10,6 +10,7 @@ from pydantic import Field, JsonValue, model_validator
 
 from paper4_pipeline.domain.models import (
     LessonPlanDocument,
+    OptimizationScope,
     RubricScores,
     StrictModel,
     TokenUsage,
@@ -49,14 +50,20 @@ class EngineLessonInput(StrictModel):
     lesson_style: str = "choose_the_best_fit_for_this_topic"
     detail_level: Literal["standard", "showcase"] = "showcase"
     optimization_focus: list[str] = Field(default_factory=list, max_length=20)
+    optimization_scope: OptimizationScope | None = None
     must_preserve_content: list[str] = Field(default_factory=list, max_length=20)
 
     @model_validator(mode="after")
     def validate_mode_fields(self) -> "EngineLessonInput":
         if self.mode == EngineMode.GENERATE and (
-            self.optimization_focus or self.must_preserve_content
+            self.optimization_focus or self.must_preserve_content or self.optimization_scope is not None
         ):
             raise ValueError("generate input cannot contain optimization-only fields")
+        if self.mode == EngineMode.OPTIMIZE and self.optimization_scope is None:
+            from paper4_pipeline.domain.scope import legacy_scope_paths
+            paths = legacy_scope_paths(self.optimization_focus)
+            object.__setattr__(self, "optimization_scope", OptimizationScope(
+                mode="local" if paths else "full", editable_paths=paths))
         return self
 
 

@@ -1,5 +1,7 @@
 <script setup lang="ts">
-withDefaults(
+import { computed, ref } from "vue";
+import { useDialogFocus } from "../composables/useDialogFocus";
+const props = withDefaults(
   defineProps<{
     open: boolean;
     title: string;
@@ -10,12 +12,23 @@ withDefaults(
   }>(),
   { confirmText: "确认", cancelText: "取消", busy: false },
 );
-defineEmits<{ confirm: []; cancel: [] }>();
+const emit = defineEmits<{ confirm: []; cancel: [] }>();
+const dialog = ref<HTMLElement | null>(null);
+function cancel() {
+  if (!props.busy) emit("cancel");
+}
+useDialogFocus(
+  computed(() => props.open),
+  dialog,
+  cancel,
+);
 </script>
 <template>
   <Teleport to="body"
-    ><div v-if="open" class="dialog-backdrop" @click.self="$emit('cancel')">
+    ><div v-if="open" class="dialog-backdrop" @click.self="cancel">
       <section
+        ref="dialog"
+        tabindex="-1"
         class="confirm-dialog"
         role="dialog"
         aria-modal="true"

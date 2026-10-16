@@ -34,7 +34,7 @@ try {
         @{ Name = 'invalid-bytes'; Expected = 1 }
     )) {
         $env:LESSON_HEALTH_CASE = $case.Name
-        $output = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $harness 2>&1
+        $output = & powershell.exe -NoProfile -File $harness 2>&1
         if ($LASTEXITCODE -ne $case.Expected) {
             throw "$($case.Name): expected exit $($case.Expected), got $LASTEXITCODE`n$output"
         }

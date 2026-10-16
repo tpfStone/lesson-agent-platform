@@ -76,8 +76,10 @@ public class LessonVersionWriteService {
         int updated = db.update("UPDATE platform_lesson SET current_version_id = ?, updated_at = ? WHERE id = ? AND current_version_id = ?",
                 versionId, now, command.lessonId(), head);
         if (updated != 1) throw conflict("教案版本已变化");
-        db.update("INSERT INTO platform_issue_revalidation (issue_id, target_version_id, status) SELECT id, ?, 'PENDING' FROM platform_issue WHERE version_id = ? AND section_ref IS NOT NULL",
-                versionId, head);
+        // Issues can belong to any ancestor, including results ingested after that
+        // version was edited. A new draft must not silently lose those review items.
+        db.update("INSERT INTO platform_issue_revalidation (issue_id, target_version_id, status) SELECT id, ?, 'PENDING' FROM platform_issue WHERE lesson_id = ? AND section_ref IS NOT NULL",
+                versionId, command.lessonId());
         if (key != null) db.update("INSERT INTO platform_version_operation (operation_key, request_fingerprint, lesson_id, version_id, created_at) VALUES (?, ?, ?, ?, ?)",
                 key, command.requestFingerprint(), command.lessonId(), versionId, now);
         return new Written(command.lessonId(), versionId, next, false);

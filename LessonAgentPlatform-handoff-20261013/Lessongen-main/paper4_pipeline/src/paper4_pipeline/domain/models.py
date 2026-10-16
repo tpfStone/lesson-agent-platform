@@ -290,6 +290,22 @@ class LessonPlanDocument(StrictModel):
         return self
 
 
+class OptimizationScope(StrictModel):
+    mode: Literal["full", "local"]
+    editable_paths: list[str] = Field(default_factory=list, max_length=100)
+
+    @model_validator(mode="after")
+    def validate_scope(self) -> "OptimizationScope":
+        from paper4_pipeline.domain.scope import validate_path_syntax
+        if self.mode == "local" and not self.editable_paths:
+            raise ValueError("local optimization scope requires at least one editable field")
+        if self.mode == "full" and self.editable_paths:
+            raise ValueError("full optimization scope must not contain local paths")
+        for path in self.editable_paths:
+            validate_path_syntax(path)
+        return self
+
+
 class LessonTask(StrictModel):
     schema_version: Literal["paper4-task-v0.1"] = "paper4-task-v0.1"
     task_id: str = Field(min_length=1)
@@ -310,6 +326,7 @@ class LessonTask(StrictModel):
     rubric_id: str = "paper4-eight-dimension-v0.1"
     source_refs: list[str] = Field(default_factory=list)
     initial_plan: LessonPlanDocument | None = None
+    optimization_scope: OptimizationScope | None = None
     metadata: dict[str, JsonValue] = Field(default_factory=dict)
 
     @field_validator(
@@ -325,10 +342,13 @@ class LessonTask(StrictModel):
 
     @model_validator(mode="after")
     def validate_mode(self) -> "LessonTask":
+        from paper4_pipeline.domain.scope import canonical_path, legacy_scope_paths
         if self.mode == TaskMode.OPTIMIZE and self.initial_plan is None:
             raise ValueError("optimize mode requires initial_plan")
         if self.mode == TaskMode.GENERATE and self.initial_plan is not None:
             raise ValueError("generate mode must not include initial_plan")
+        if self.mode == TaskMode.GENERATE and self.optimization_scope is not None:
+            raise ValueError("generate mode cannot contain optimization scope")
         if self.initial_plan and self.initial_plan.task_id != self.task_id:
             raise ValueError("initial_plan.task_id must match task_id")
         if self.initial_plan:
@@ -341,6 +361,15 @@ class LessonTask(StrictModel):
                 raise ValueError(
                     "initial_plan subject, grade, and topic must match the task"
                 )
+            scope = self.optimization_scope
+            if scope is None:
+                focus = self.class_constraints.get("optimization_focus", [])
+                paths = legacy_scope_paths(focus)
+                scope = OptimizationScope(mode="local" if paths else "full", editable_paths=paths)
+            if scope.mode == "local":
+                paths = sorted(set(canonical_path(self.initial_plan, path) for path in scope.editable_paths))
+                scope = OptimizationScope(mode="local", editable_paths=paths)
+            object.__setattr__(self, "optimization_scope", scope)
         return self
 
 
@@ -915,6 +944,7 @@ class PipelineResult(StrictModel):
     run_id: str = Field(min_length=1)
     task_id: str = Field(min_length=1)
     task_mode: TaskMode | None = None
+    optimization_scope: OptimizationScope | None = None
     experiment_id: str = Field(min_length=1)
     method_id: str = Field(min_length=1)
     status: RunStatus

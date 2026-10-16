@@ -28,7 +28,13 @@ export interface LessonInput {
   retryOfJobId?: string;
 }
 
+export interface OptimizationScope {
+  mode: "local" | "full";
+  editablePaths: string[];
+}
+
 export interface OptimizeInput extends LessonInput {
+  optimizationScope?: OptimizationScope;
   optimizationFocus?: string[];
   mustPreserveContent?: string[];
 }
@@ -130,6 +136,8 @@ export interface LessonResult {
   parseWarnings: string[];
 }
 export interface OptimizationSummary {
+  scope?: { mode: "local" | "full"; editable_paths: string[] } | null;
+  baseline_warnings?: string[];
   outcome:
     | "changed"
     | "revisions_not_selected"

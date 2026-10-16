@@ -20,9 +20,17 @@ public class LessonStructureRepairCommand implements ApplicationRunner {
     }
     @Override public void run(ApplicationArguments args) throws Exception {
         boolean apply = Boolean.parseBoolean(option(args, "repair-apply", "false"));
+        boolean rollback = Boolean.parseBoolean(option(args, "repair-rollback", "false"));
         if (apply) {
             Path manifest = Path.of(option(args, "repair-manifest", "reviewed-repairs.json")).toAbsolutePath();
-            for (var item : mapper.readTree(Files.readAllBytes(manifest))) {
+            var entries = mapper.readTree(Files.readAllBytes(manifest));
+            if (!entries.isArray() || entries.isEmpty()) throw new IllegalArgumentException("reviewed manifest must be a nonempty array");
+            for (var item : entries) {
+                if (rollback) {
+                    repairs.rollback(item.path("auditId").asText(), item.path("expectedContentSha256").asText(),
+                            item.path("expectedCurrentRowSha256").asText(), item.path("reason").asText());
+                    continue;
+                }
                 Path document = manifest.getParent().resolve(item.path("documentPath").asText()).normalize();
                 repairs.repair(item.path("versionId").asText(), item.path("expectedContentSha256").asText(),
                         item.path("expectedOldRawStructureSha256").isNull() || item.path("expectedOldRawStructureSha256").isMissingNode()
@@ -37,5 +45,7 @@ public class LessonStructureRepairCommand implements ApplicationRunner {
             report.addAll(batch); cursor = batch.get(batch.size() - 1).versionId();
         }
         Files.writeString(Path.of(option(args, "repair-report", "structure-repair-report.json")), mapper.writeValueAsString(report));
+        if (args.containsOption("repair-audit-report")) Files.writeString(
+                Path.of(option(args, "repair-audit-report", "structure-repair-audits.json")), mapper.writeValueAsString(repairs.inspectRollbacks()));
     }
 }

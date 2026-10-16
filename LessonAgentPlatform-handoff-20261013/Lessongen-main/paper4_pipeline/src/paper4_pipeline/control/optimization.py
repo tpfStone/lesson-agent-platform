@@ -201,6 +201,9 @@ def optimization_summary(result: PipelineResult) -> dict[str, Any]:
     )
     return {
         "outcome": outcome,
+        "scope": result.optimization_scope.model_dump(mode="json") if result.optimization_scope else None,
+        "baseline_warnings": [v.message for v in baseline.rule_check_report.violations
+                              if v.message.startswith("原稿已有且位于本次范围外")],
         "message": message,
         "baseline_version_id": baseline.version_id,
         "selected_version_id": selected.version_id,

@@ -86,6 +86,7 @@ def build_task(
             *([f"web:docx:{source_sha256}"] if source_sha256 else []),
         ],
         initial_plan=initial_plan,
+        optimization_scope=task_input.optimization_scope,
         metadata={
             "input_method": "web_v1",
             "lesson_style": task_input.lesson_style,

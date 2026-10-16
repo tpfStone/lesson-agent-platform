@@ -31,7 +31,8 @@ from pydantic import BaseModel, Field
 
 from pipeline import load_config
 from providers import get_key_status
-from service import run_annotation
+from annotation_execution import execute_annotation_worker
+from isolated_worker import WorkerTimeout
 from standards import score_to_grade
 from comparison import generate_comparison
 from batch_reporting import build_comparison_payload, write_batch_quality_report
@@ -280,6 +281,16 @@ def _initialize_run(request: AnnotationRequest) -> tuple[str, Path, dict]:
 
 
 def _execute(run_id: str, request: AnnotationRequest) -> None:
+    store = TaskStore(RUN_ROOT)
+    if not store.claim(run_id):
+        return
+    try:
+        _execute_claimed(run_id, request)
+    finally:
+        store.release(run_id)
+
+
+def _execute_claimed(run_id: str, request: AnnotationRequest) -> None:
     run_dir = RUN_ROOT / run_id
     record = _read_state(run_dir)
     record["status"] = "RUNNING"
@@ -312,9 +323,10 @@ def _execute(run_id: str, request: AnnotationRequest) -> None:
         config = deepcopy(load_config(ROOT / "config.yaml"))
         config.setdefault("data", {})["plans_dir"] = str(input_dir)
         config.setdefault("output", {})["dir"] = str(run_dir / "output")
+        config['_run_id'] = run_id
 
         # 平台整合口径：学生标准 + V2 引导提示词。
-        outcome = run_annotation(
+        outcome = execute_annotation_worker(
             str(ROOT),
             config,
             filename,
@@ -359,14 +371,17 @@ def _execute(run_id: str, request: AnnotationRequest) -> None:
             "inputKind": request.input_kind,
             "artifactStatus": outcome.get('artifactStatus', {}),
         }
-        (run_dir / "result.json").write_text(
-            json.dumps(result_payload, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
+        atomic_json(run_dir / "result.json", result_payload)
 
         record.update(
             status="COMPLETED",
             artifacts=stored_artifacts,
+            finishedAt=datetime.now(timezone.utc).isoformat(),
+        )
+    except WorkerTimeout:
+        record.update(
+            status="FAILED", errorCode="F1_HARD_TIMEOUT",
+            error="评分任务超过进程执行时限，已终止；未完成的模型请求费用保持未知，不会自动重评",
             finishedAt=datetime.now(timezone.utc).isoformat(),
         )
     except Exception:
@@ -418,7 +433,7 @@ def annotate(request: AnnotationRequest):
 def recover_tasks():
     for run_id, payload in TaskStore(RUN_ROOT).recover():
         EXECUTOR.submit(_execute, run_id, AnnotationRequest.model_validate(payload))
-    for batch_id, payload in TaskStore(BATCH_ROOT).recover():
+    for batch_id, payload in TaskStore(BATCH_ROOT).recover(resume_running=True):
         EXECUTOR.submit(_execute_batch, batch_id, BatchAnnotationRequest.model_validate(payload))
 
 
@@ -526,8 +541,19 @@ def _comparison_public_state(comparison_id: str, record: dict) -> dict:
 
 
 def _execute_batch(batch_id: str, request: BatchAnnotationRequest) -> None:
+    store = TaskStore(BATCH_ROOT)
+    if not store.claim(batch_id):
+        return
+    try:
+        _execute_batch_claimed(batch_id, request)
+    finally:
+        store.release(batch_id)
+
+
+def _execute_batch_claimed(batch_id: str, request: BatchAnnotationRequest) -> None:
     batch_dir = BATCH_ROOT / batch_id
     record = _read_state(batch_dir)
+    previous_items = {item.get('index'): item for item in record.get('items', [])}
     record.update(status="RUNNING", startedAt=datetime.now(timezone.utc).isoformat())
     _write_state(batch_dir, record)
 
@@ -538,6 +564,18 @@ def _execute_batch(batch_id: str, request: BatchAnnotationRequest) -> None:
     try:
         for index, item in enumerate(request.items, start=1):
             try:
+                previous = previous_items.get(index)
+                previous_run = previous.get('runId') if previous else None
+                expected_run = hashlib.sha256(item.request_key.encode()).hexdigest()[:32] if item.request_key else None
+                if previous_run and (previous_run != expected_run or not (RUN_ROOT / previous_run / 'state.json').is_file()):
+                    # A persisted child reference proves work may already have run.
+                    # Missing/corrupt identity is not authorization to recreate it.
+                    item_records.append({**previous, 'status': 'INTERRUPTED',
+                        'error': 'RECOVERY_CHILD_STATE_UNCONFIRMED'})
+                    failed_count += 1
+                    record.update(completed=index, succeeded=len(success_results), failed=failed_count, items=item_records)
+                    _write_state(batch_dir, record)
+                    continue
                 run_id, _run_dir_path, run_record = _initialize_run(item)
                 current = {
                     "index": index,
@@ -558,7 +596,7 @@ def _execute_batch(batch_id: str, request: BatchAnnotationRequest) -> None:
                 _write_state(batch_dir, record)
 
                 # 批量任务在同一工作线程内同步复用现有单份执行逻辑，避免产生第二套评分实现。
-                if run_record['_new']:
+                if run_record.get('status') == 'QUEUED':
                     _execute(run_id, item)
                 final_run_state = _read_state(RUN_ROOT / run_id)
                 current["status"] = final_run_state.get("status")

@@ -31,6 +31,7 @@ from paper4_pipeline.control.routing import (
     route_after_validation,
 )
 from paper4_pipeline.control.rules import check_lesson_plan
+from paper4_pipeline.domain.scope import enforce_scope
 from paper4_pipeline.control.versioning import document_hash, select_best_version
 from paper4_pipeline.domain.models import (
     CritiqueBatch,
@@ -78,6 +79,7 @@ class RevisionNodes:
                 batch.round_index,
                 knowledge,
             )
+            enforce_scope(task, output.value.document)
         except Exception as exc:
             # A rewrite is the only step that turns a reviewed draft into the
             # next version.  If the real model cannot produce a contract-valid

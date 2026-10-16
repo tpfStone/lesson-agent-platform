@@ -12,7 +12,7 @@ def test_retry_does_not_rescore(tmp_path, monkeypatch):
     (directory / 'result.json').write_text(json.dumps({'rawResult': {'score': 87}, 'score': {'total': 87},
         'artifactStatus': {'docx': {'status': 'FAILED'}}}))
     def forbidden(*args, **kwargs): raise AssertionError('must not rescore')
-    monkeypatch.setattr(platform_api, 'run_annotation', forbidden)
+    monkeypatch.setattr(platform_api, 'execute_annotation_worker', forbidden)
     import service
     def export(result, path):
         assert result == {'score': 87}

@@ -70,6 +70,10 @@ class DocxNormalizer:
                     "normalizer did not account for must-preserve items: "
                     + ", ".join(sorted(missing_preserved))
                 )
+            from paper4_pipeline.web_api.source_preservation import checked_source_coverage
+            checked = checked_source_coverage(raw, plan, task_input)
+            if checked is not None:
+                value.raw_locator_coverage = checked
 
         response = self.provider.invoke_structured(
             prompt=self.prompt,
@@ -82,6 +86,8 @@ class DocxNormalizer:
                 },
                 "authoritative_metadata": authoritative,
                 "optimization_focus": task_input.optimization_focus,
+                "optimization_scope": task_input.optimization_scope.model_dump(mode="json") if task_input.optimization_scope else None,
+                "normalization_policy": "只归类原文，不得增删改写；局部优化将在基线保存后独立进行。",
                 "must_preserve_content": task_input.must_preserve_content,
                 "raw_document": raw.model_dump(mode="json"),
             },

@@ -42,7 +42,12 @@ public class PlatformOptimizeController {
             @Pattern(regexp = "choose_the_best_fit_for_this_topic|inquiry_through_cognitive_conflict|authentic_problem_driven|dialogue_and_discussion|project_or_task_based|close_reading_and_evidence") String lessonStyle,
             @Pattern(regexp = "standard|showcase") String detailLevel,
             @Size(max = 20) List<@NotBlank @Size(max = 1000) String> optimizationFocus,
-            @Size(max = 20) List<@NotBlank @Size(max = 2000) String> mustPreserveContent) {}
+            @Size(max = 20) List<@NotBlank @Size(max = 2000) String> mustPreserveContent,
+            @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL) com.zone.lesoongen.api.dto.OptimizationScope optimizationScope) {
+        public Start(String versionId, UUID requestKey, String subject, String grade, String topic, Integer durationMinutes, String courseInformation, String textbookVersion, String textbookContent, List<String> curriculumStandards, List<String> learningObjectives, String studentProfile, Integer classSize, List<String> availableResources, String additionalRequirements, String lessonStyle, String detailLevel, List<String> optimizationFocus, List<String> mustPreserveContent) {
+            this(versionId, requestKey, subject, grade, topic, durationMinutes, courseInformation, textbookVersion, textbookContent, curriculumStandards, learningObjectives, studentProfile, classSize, availableResources, additionalRequirements, lessonStyle, detailLevel, optimizationFocus, mustPreserveContent, null);
+        }
+    }
 
     @PostMapping
     public LessonResponses.JobAccepted start(@PathVariable String lessonId, @Valid @RequestBody Start input) {

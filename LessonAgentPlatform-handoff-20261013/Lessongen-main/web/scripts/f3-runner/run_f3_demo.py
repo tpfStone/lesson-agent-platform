@@ -3,7 +3,7 @@
 The filename is kept for backward-compatible Java configuration, but the
 implementation uses the formal asynchronous F3 v3 Session API:
 
-POST /api/classroom/sessions -> poll status -> POST /analyze -> GET /result.
+POST /api/classroom/sessions -> poll status -> wait for automatic analysis -> GET /result.
 """
 from __future__ import annotations
 
@@ -70,7 +70,7 @@ def load_config(path: str | Path) -> Dict[str, Any]:
         "timeoutSeconds": data.get("timeoutSeconds", 3),
         "maxConsecutiveTimeouts": data.get("maxConsecutiveTimeouts", 50),
         "maxEvents": data.get("maxEvents", 40),
-        "maxWallClockSeconds": data.get("maxWallClockSeconds", 900),
+        "maxWallClockSeconds": data.get("maxWallClockSeconds"),
         "activeRoles": data.get("activeRoles"),
         "liveStatusPath": data.get("liveStatusPath"),
     }
@@ -82,6 +82,8 @@ def load_config(path: str | Path) -> Dict[str, Any]:
         normalized["requestKey"] = normalized["requestKey"].strip()
     for key in ("timeoutSeconds", "maxConsecutiveTimeouts", "maxEvents", "maxWallClockSeconds"):
         value = normalized[key]
+        if key == "maxWallClockSeconds" and value is None:
+            continue
         if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
             raise ValueError(f"{key} 必须是正整数")
     roles = normalized["activeRoles"]
@@ -241,11 +243,13 @@ def start_f3_session(
     return data
 
 
-def poll_completed(session: requests.Session, f3_url: str, session_id: str, max_seconds: int) -> Dict[str, Any]:
-    deadline = time.monotonic() + max_seconds + 60
+def poll_completed(session: requests.Session, f3_url: str, session_id: str, max_seconds: int | None) -> Dict[str, Any]:
+    # F3 owns the optional activity-time limit, including pause exclusion. This
+    # client only bounds loss of communication; a healthy paused session can wait.
+    last_contact = time.monotonic()
     last: Dict[str, Any] = {}
     last_transport_error = ""
-    while time.monotonic() < deadline:
+    while time.monotonic() - last_contact < 120:
         try:
             response = session.get(
                 f"{f3_url.rstrip('/')}/api/classroom/sessions/{session_id}",
@@ -268,6 +272,7 @@ def poll_completed(session: requests.Session, f3_url: str, session_id: str, max_
             raise RuntimeError("F3 session 状态返回不是 JSON 对象")
 
         last = data
+        last_contact = time.monotonic()
         status = str(data.get("status") or "").upper()
 
         if status == "COMPLETED":
@@ -285,7 +290,7 @@ def poll_completed(session: requests.Session, f3_url: str, session_id: str, max_
         if not stopped.ok: suffix += '; remote termination unconfirmed'
     except requests.RequestException:
         suffix += '; remote termination unconfirmed'
-    raise RuntimeError(f"等待 F3 session COMPLETED 超时，最后状态: {last.get('status')}{suffix}")
+    raise RuntimeError(f"F3 连续通信失败超过 120 秒，最后状态: {last.get('status')}{suffix}")
 
 
 def _analysis_artifact_ready(result: Dict[str, Any]) -> bool:
@@ -293,31 +298,23 @@ def _analysis_artifact_ready(result: Dict[str, Any]) -> bool:
     return isinstance(artifacts, list) and "issue_analysis.json" in artifacts
 
 
-def analyze_session(session: requests.Session, f3_url: str, session_id: str) -> None:
+def analyze_session(session: requests.Session, f3_url: str, session_id: str, *, wait_seconds: float = 330) -> None:
+    """Wait for F3's single automatic attempt; never submit a paid retry.
+
+    FAILED is an available result, not successful analysis. Its state and warnings
+    are retained in the record; only an explicit user action can request a retry.
+    """
+    deadline = time.monotonic() + wait_seconds
     last_error = ""
-    for attempt in range(3):
+    while time.monotonic() < deadline:
         try:
-            response = session.post(
-                f"{f3_url.rstrip('/')}/api/classroom/sessions/{session_id}/analyze",
-                timeout=180,
-            )
-            if response.ok:
+            result = get_result(session, f3_url, session_id, attempts=1)
+            if _analysis_artifact_ready(result) or result.get("analysisStatus") in {"COMPLETED", "FAILED"}:
                 return
-            if response.status_code < 500:
-                raise RuntimeError(
-                    f"F3 /analyze 失败: HTTP {response.status_code} {response.text[:1000]}"
-                )
-            last_error = f"HTTP {response.status_code} {response.text[:500]}"
-        except requests.RequestException as exc:
+        except (RuntimeError, requests.RequestException) as exc:
             last_error = f"{type(exc).__name__}: {exc}"
-        try:
-            if _analysis_artifact_ready(get_result(session, f3_url, session_id, attempts=1)):
-                return
-        except (RuntimeError, requests.RequestException):
-            pass
-        if attempt < 2:
-            time.sleep(3)
-    raise RuntimeError(f"F3 /analyze 多次未完成: {last_error}")
+        time.sleep(3)
+    raise RuntimeError(f"F3 分析结果尚未就绪，未自动重发请求：{last_error}")
 
 
 def get_result(session: requests.Session, f3_url: str, session_id: str,
@@ -548,7 +545,8 @@ def run_demo(config: Dict[str, Any], *, http_session: Optional[requests.Session]
         last_state = poll_completed(session, config["f3Url"], f3_session_id, config["maxWallClockSeconds"])
         preliminary = get_result(session, config["f3Url"], f3_session_id)
         if not _analysis_artifact_ready(preliminary):
-            analyze_session(session, config["f3Url"], f3_session_id)
+            analyze_session(session, config["f3Url"], f3_session_id,
+                            wait_seconds=float(last_state.get("analysisTimeoutSeconds", 300)) + 30)
         f3_result = get_result(session, config["f3Url"], f3_session_id)
         status = str(last_state.get("status") or "COMPLETED")
     except Exception as exc:

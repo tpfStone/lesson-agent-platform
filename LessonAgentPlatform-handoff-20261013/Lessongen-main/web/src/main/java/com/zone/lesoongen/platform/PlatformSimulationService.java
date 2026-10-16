@@ -107,16 +107,22 @@ public class PlatformSimulationService {
             if (!existing.resultSha256().equals(value.resultSha256())) {
                 Map<String, Object> original = parseJson(existing.resultJson());
                 if (isDynamicF3(original) && isDynamicF3(record) && sameExecution(original, record)
-                        && "COMPLETED".equals(record.get("analysisStatus"))) {
+                        && ("COMPLETED".equals(record.get("analysisStatus"))
+                                || "FAILED".equals(record.get("analysisStatus")))) {
                     db.queryForObject("SELECT id FROM platform_simulation_run WHERE id = ? FOR UPDATE", String.class, existing.id());
-                    int known = db.queryForObject("SELECT COUNT(*) FROM platform_simulation_analysis WHERE simulation_run_id = ? AND result_sha256 = ?",
-                            Integer.class, existing.id(), value.resultSha256());
-                    if (known == 0) {
-                        int revision = db.queryForObject("SELECT COALESCE(MAX(analysis_revision), 0) + 1 FROM platform_simulation_analysis WHERE simulation_run_id = ?", Integer.class, existing.id());
+                    // A preceding ordinary read may have opened a MySQL RR snapshot. Read
+                    // revisions with the current-read lock after serializing on the run row.
+                    var revisions = db.query("SELECT analysis_revision, result_sha256 FROM platform_simulation_analysis WHERE simulation_run_id = ? ORDER BY analysis_revision DESC FOR UPDATE",
+                            (rs, row) -> Map.entry(rs.getInt(1), rs.getString(2)), existing.id());
+                    boolean known = revisions.stream().anyMatch(item -> item.getValue().equals(value.resultSha256()));
+                    if (!known) {
+                        int revision = revisions.isEmpty() ? 1 : revisions.get(0).getKey() + 1;
                         db.update("INSERT INTO platform_simulation_analysis (simulation_run_id, analysis_revision, result_sha256, result_json, summary_markdown, created_at) VALUES (?, ?, ?, ?, ?, ?)",
                                 existing.id(), revision, value.resultSha256(), value.resultJson(), value.summaryMarkdown(), Timestamp.from(Instant.now()));
                     }
-                    issueIngest.ingestF3(existing.lessonId(), existing.versionId(), existing.id(), existing.f3SessionId(), record);
+                    if ("COMPLETED".equals(record.get("analysisStatus"))) {
+                        issueIngest.ingestF3(existing.lessonId(), existing.versionId(), existing.id(), existing.f3SessionId(), record);
+                    }
                     return saveResponse(existing, true);
                 }
                 throw new AppException(HttpStatus.CONFLICT, "SIMULATION_RESULT_CONFLICT",

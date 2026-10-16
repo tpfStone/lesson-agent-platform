@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { useRouter } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 import AppPageHeader from "../components/AppPageHeader.vue";
 import LessonSelectorBar, {
   type LessonOption,
@@ -9,10 +9,15 @@ import LessonSelectorBar, {
 import { useWorkflowStore } from "../stores/workflow";
 
 const router = useRouter();
+const route = useRoute();
 const workflow = useWorkflowStore();
 
 const isWorkflowStep = computed(() =>
-  Boolean(workflow.activeRun && workflow.currentStep?.id === "F1"),
+  Boolean(
+    route.query.upload !== "1" &&
+    workflow.activeRun &&
+    workflow.currentStep?.id === "F1",
+  ),
 );
 const workflowHasLesson = computed(() =>
   Boolean(
@@ -92,6 +97,7 @@ function enterLockedLesson() {
 
     <LessonSelectorBar
       v-else
+      :initial-upload="route.query.upload === '1'"
       :show-tools="false"
       action-label="确认使用此教案"
       @action="confirmLesson"

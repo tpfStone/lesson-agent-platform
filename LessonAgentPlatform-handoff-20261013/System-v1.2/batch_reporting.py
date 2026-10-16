@@ -8,6 +8,7 @@ from statistics import mean
 from typing import Iterable
 
 from docx import Document
+from annotator import _setup_font, _format_generated_runs
 
 
 def _round(value: float) -> float:
@@ -234,6 +235,7 @@ def write_batch_quality_report(results: list[dict], output_dir: str | Path) -> d
     json_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
     doc = Document()
+    _setup_font(doc)
     doc.add_heading("批量教案质量综合报告", level=0)
     summary = payload["summary"]
     doc.add_paragraph(
@@ -246,6 +248,8 @@ def write_batch_quality_report(results: list[dict], output_dir: str | Path) -> d
     headers = ["教案/版本", "主题", "学科", "得分", "排名"]
     for i, value in enumerate(headers):
         table.rows[0].cells[i].text = value
+        for run in table.rows[0].cells[i].paragraphs[0].runs:
+            run.bold = True
     for row in payload["lessons"]:
         cells = table.add_row().cells
         cells[0].text = f"{row.get('lessonId') or ''} / {row.get('versionId') or ''}"
@@ -281,6 +285,8 @@ def write_batch_quality_report(results: list[dict], output_dir: str | Path) -> d
     headers = ["维度", "平均分", "满分", "得分率", "A/B/C", "批注数"]
     for i, value in enumerate(headers):
         dim_table.rows[0].cells[i].text = value
+        for run in dim_table.rows[0].cells[i].paragraphs[0].runs:
+            run.bold = True
     for row in payload["dimensions"]:
         cells = dim_table.add_row().cells
         cells[0].text = row["name"]
@@ -298,5 +304,6 @@ def write_batch_quality_report(results: list[dict], output_dir: str | Path) -> d
     )
 
     docx_path = output_dir / "batch_quality_report.docx"
+    _format_generated_runs(doc)
     doc.save(docx_path)
     return {"quality_json": str(json_path), "quality_docx": str(docx_path)}

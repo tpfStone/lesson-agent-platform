@@ -43,7 +43,8 @@ from app.contracts.session import (
     SettingsPatch,
 )
 from app.llm.mock import MockProvider
-from app.llm.provider import create_llm
+from app.llm.provider import create_llm, OpenAICompatProvider, ModelRequestUncertain, positive_timeout
+from app.isolated_worker import WorkerFailed, WorkerTimeout, run_isolated
 from app.storage.event_store import EventStore
 from app.teaching_plan import ParsedTeachingSection, parse_teaching_script
 
@@ -54,6 +55,67 @@ _TERMINAL = {
     SessionStatus.FAILED,
 }
 _STOP = object()
+
+
+class _TurnInterrupted(RuntimeError):
+    """Control interruption, distinct from a provider failure eligible for retry."""
+
+
+class _ControlledClassroomProvider:
+    """Gate every manager/agent request, including validation retries.
+
+    The underlying call runs without the control lock. A response already in
+    flight may still incur usage, but waits here before changing classroom state.
+    Terminal-session analysis uses the original provider independently.
+    """
+
+    def __init__(self, provider, runtime: SessionRuntime,
+                 checkpoint: Callable[[], bool], persist: Callable[[], None]):
+        self.provider = provider
+        self.runtime = runtime
+        self.checkpoint = checkpoint
+        self.persist = persist
+
+    def __getattr__(self, name):
+        return getattr(self.provider, name)
+
+    def chat(self, *args, **kwargs):
+        # Admission is the linearization point shared with pause/end. Once
+        # admitted, this request is explicitly in flight even if its provider
+        # invocation is scheduled later; the snapshot never claims HTTP was sent.
+        with self.runtime.lock:
+            if not self.checkpoint():
+                raise _TurnInterrupted()
+            request = {"requestId": str(uuid.uuid4()), "admittedAt": utc_now(),
+                       "dispatchStartedAt": None, "responseReceivedAt": None}
+            self.runtime.in_flight_model_request = request
+        try:
+            with self.runtime.lock:
+                # Provider invocation time, not a transport/socket timestamp.
+                request["dispatchStartedAt"] = utc_now()
+            if isinstance(self.provider, OpenAICompatProvider):
+                return self.provider.chat_isolated(*args, **kwargs,
+                    cancelled=lambda: self.runtime.stop_requested or self.runtime.status in _TERMINAL)
+            return self.provider.chat(*args, **kwargs)
+        except ModelRequestUncertain as error:
+            with self.runtime.lock:
+                self.runtime.model_request_uncertain = True
+                self.runtime.stop_requested = True
+                self.runtime.stop_reason = self.runtime.stop_reason or str(error)
+                self.runtime.condition.notify_all()
+            raise
+        finally:
+            with self.runtime.lock:
+                request["responseReceivedAt"] = utc_now()
+            try:
+                # Errors must obey pause/stop too; otherwise a late failure may
+                # publish a failed event or trigger another request while paused.
+                if not self.checkpoint():
+                    raise _TurnInterrupted()
+            finally:
+                with self.runtime.lock:
+                    self.runtime.in_flight_model_request = None
+                    self.persist()
 
 
 def utc_now() -> str:
@@ -102,6 +164,10 @@ class SessionRuntime:
     analysis: AnalysisResult | None = None
     materials_complete_sequence: int | None = None
     request_fingerprint: str | None = None
+    in_flight_model_request: dict[str, Any] | None = None
+    paused_seconds: float = 0.0
+    paused_at: float | None = None
+    model_request_uncertain: bool = False
 
     def __post_init__(self):
         self.condition = threading.Condition(self.lock)
@@ -147,7 +213,18 @@ class ClassroomService:
             existing_id = self._request_keys.get(request.request_key)
             if existing_id:
                 existing = self.get_session(existing_id)
-                if existing.get('requestFingerprint') != fingerprint:
+                matches = existing.get('requestFingerprint') == fingerprint
+                # Requests created before the optional total limit had an effective
+                # default of 900. Only an omitted field may replay that exact hash;
+                # every other field and the original stored contract stay unchanged.
+                if not matches and 'max_wall_clock_seconds' not in request.model_fields_set:
+                    legacy = request.model_dump(mode='json', by_alias=True)
+                    legacy['maxWallClockSeconds'] = 900
+                    legacy_fingerprint = hashlib.sha256(json.dumps(legacy, sort_keys=True,
+                        ensure_ascii=False, separators=(',', ':')).encode()).hexdigest()
+                    matches = (existing.get('limits', {}).get('maxWallClockSeconds') == 900
+                               and existing.get('requestFingerprint') == legacy_fingerprint)
+                if not matches:
                     raise ValueError('REQUEST_KEY_CONFLICT: request key belongs to a different or unverifiable payload')
                 return existing, True
             if sum(r.status not in _TERMINAL for r in self._sessions.values()) >= self.max_active_sessions:
@@ -166,6 +243,8 @@ class ClassroomService:
             materials, teaching_plan, input_mode = self._prepare_materials(input_materials)
             limits = request.limits()
             session_dir = self.storage_root / session_id
+            if hasattr(llm, "bind_usage"):
+                llm.bind_usage(session_dir / "model_usage.jsonl", session_id)
             classroom = Classroom(
                 llm=llm,
                 materials=materials,
@@ -201,6 +280,13 @@ class ClassroomService:
                 event_store=EventStore(self.storage_root, session_id),
                 request_fingerprint=fingerprint,
             )
+            controlled_llm = _ControlledClassroomProvider(
+                llm, runtime, lambda: self._wait_until_runnable(runtime),
+                lambda: self._persist_session(runtime),
+            )
+            classroom.manager.llm = controlled_llm
+            for agent in classroom.agents.values():
+                agent.llm = controlled_llm
             # Publish the idempotency entry only after durable creation succeeds.
             # Otherwise a failed write makes the retry bypass persistence and startup.
             self._persist_session(runtime)
@@ -269,6 +355,7 @@ class ClassroomService:
             # Timeout safety pause is cleared by _process_event(user_input). Manual
             # pause intentionally stays paused until /resume.
             if runtime.pause_reason == "MAX_CONSECUTIVE_TIMEOUTS" and not runtime.manual_paused:
+                self._stop_pause_clock(runtime)
                 runtime.status = SessionStatus.RUNNING
                 runtime.pause_reason = None
                 runtime.condition.notify_all()
@@ -280,6 +367,7 @@ class ClassroomService:
         with runtime.lock:
             self._ensure_not_terminal(runtime)
             runtime.manual_paused = True
+            self._start_pause_clock(runtime)
             runtime.pause_reason = "MANUAL"
             runtime.status = SessionStatus.PAUSED
             self._persist_session(runtime)
@@ -290,6 +378,7 @@ class ClassroomService:
         with runtime.lock:
             self._ensure_not_terminal(runtime)
             previous_reason = runtime.pause_reason
+            self._stop_pause_clock(runtime)
             runtime.manual_paused = False
             runtime.status = SessionStatus.RUNNING
             runtime.pause_reason = None
@@ -300,6 +389,7 @@ class ClassroomService:
                     runtime.message_queue.put_nowait(ClassroomEvent(TRIGGER_EMPTY_ENTER))
                 except queue.Full:
                     runtime.manual_paused = True
+                    self._start_pause_clock(runtime)
                     runtime.status = SessionStatus.PAUSED
                     runtime.pause_reason = previous_reason
                     raise RuntimeError('SESSION_MESSAGE_CAPACITY')
@@ -416,7 +506,7 @@ class ClassroomService:
                 session_status = runtime.status.value
                 stop_reason = runtime.stop_reason
                 model_mode = runtime.model_mode.value
-            analysis = IssueAnalysisAgent(runtime.classroom.llm).analyze(
+            analysis = self._analyze_bounded(runtime.classroom.llm,
                 session_id=runtime.session_id,
                 version_id=runtime.version_id,
                 events=events,
@@ -444,9 +534,15 @@ class ClassroomService:
             events = [ClassroomEventRecord.model_validate(e) for e in self.get_events(session_id)]
             from app.contracts.session import MaterialInput
             materials = [MaterialInput.model_validate(m).to_classroom_material() for m in session.get('materials', [])]
-            analysis = cached if cached and cached.analysis_status == 'COMPLETED' else IssueAnalysisAgent(self.llm_factory(ModelMode(session['modelMode']))).analyze(
-                session_id=session_id, version_id=session['versionId'], events=events, materials=materials,
-                session_status=session['status'], stop_reason=session.get('stopReason'), model_mode=session['modelMode'])
+            if cached and cached.analysis_status == 'COMPLETED':
+                analysis = cached
+            else:
+                llm = self.llm_factory(ModelMode(session['modelMode']))
+                if hasattr(llm, "bind_usage"):
+                    llm.bind_usage(directory / "model_usage.jsonl", session_id)
+                analysis = self._analyze_bounded(llm,
+                    session_id=session_id, version_id=session['versionId'], events=events, materials=materials,
+                    session_status=session['status'], stop_reason=session.get('stopReason'), model_mode=session['modelMode'])
             statistics = build_statistics(events, materials)
             result = {'schemaVersion': '2.1', 'session': session, 'events': [e.model_dump(by_alias=True) for e in events],
                 'statistics': statistics, 'summary': build_summary(session=session, events=events, statistics=statistics),
@@ -470,21 +566,27 @@ class ClassroomService:
         path = self.storage_root / session_id / "session_record.json"
         if path.exists():
             result = json.loads(path.read_text(encoding="utf-8"))
-            if session_id in self._archived: result['session'] = self.get_session(session_id)
+            if session_id in self._archived:
+                result['session'] = self.get_session(session_id)
+                result['executionStatus'] = result['session']['status']
             return result
         if session_id in self._archived:
             session = self._archived[session_id]
+            analysis_path = self.storage_root / session_id / 'issue_analysis.json'
+            analysis = (AnalysisResult.model_validate_json(analysis_path.read_text(encoding='utf-8'))
+                        if analysis_path.exists() else None)
             return {
                 "schemaVersion": "2.0",
                 "executionStatus": session['status'],
-                "analysisStatus": "PENDING",
+                "analysisStatus": analysis.analysis_status if analysis else "PENDING",
                 "archiveStatus": "LOCAL",
                 "session": session,
                 "events": self.get_events(session_id),
                 "statistics": {},
                 "summary": {},
-                "issues": [],
-                "actionItems": [],
+                "issues": [i.model_dump(by_alias=True) for i in analysis.issues] if analysis else [],
+                "actionItems": analysis.action_items if analysis else [],
+                "analysisWarnings": analysis.warnings if analysis else [],
                 "artifacts": [],
             }
         raise KeyError(session_id)
@@ -514,6 +616,41 @@ class ClassroomService:
             thread.join(timeout=timeout)
         return self.get_session(session_id)
 
+    def _analyze_bounded(self, provider, *, allow_retry=True, **values) -> AnalysisResult:
+        """One durable analysis attempt; only this parent publishes a result."""
+        if not isinstance(provider, OpenAICompatProvider):
+            return IssueAnalysisAgent(provider).analyze(**values)
+        directory = self.storage_root / values['session_id']
+        attempt_path = directory / 'analysis_attempt.json'
+        if attempt_path.exists():
+            previous = json.loads(attempt_path.read_text(encoding='utf-8'))
+            if previous.get('status') == 'COMPLETED' and previous.get('result'):
+                return AnalysisResult.model_validate(previous['result'])
+            if not allow_retry:
+                if previous.get('result'):
+                    return AnalysisResult.model_validate(previous['result'])
+                return AnalysisResult(sessionId=values['session_id'], sourceVersionId=values['version_id'],
+                    modelMode=values.get('model_mode'), analysisStatus='FAILED',
+                    warnings=['ANALYSIS_INTERRUPTED_UNKNOWN: explicit retry required'])
+        attempt_id = uuid.uuid4().hex
+        attempt = {'attemptId': attempt_id, 'status': 'STARTED', 'startedAt': utc_now()}
+        atomic_text(attempt_path, json.dumps(attempt))
+        serializable = {**values, 'events': [e.model_dump(by_alias=True) for e in values['events']]}
+        try:
+            result = run_isolated('app.analysis.worker:analyze',
+                [provider.worker_config(), str(provider.ledger.path.resolve()), serializable], {},
+                directory / 'workers' / ('analysis-' + attempt_id),
+                positive_timeout('F3_ANALYSIS_TIMEOUT_SECONDS', 300))
+            analysis = AnalysisResult.model_validate(result)
+        except WorkerFailed as error:
+            reason = 'ANALYSIS_HARD_TIMEOUT' if isinstance(error, WorkerTimeout) else 'ANALYSIS_WORKER_UNKNOWN'
+            analysis = AnalysisResult(sessionId=values['session_id'], sourceVersionId=values['version_id'],
+                modelMode=values.get('model_mode'), analysisStatus='FAILED',
+                warnings=[reason + ': existing classroom events retained; explicit retry required'])
+        attempt.update(status=analysis.analysis_status, finishedAt=utc_now(), result=analysis.model_dump(by_alias=True))
+        atomic_text(attempt_path, json.dumps(attempt, ensure_ascii=False))
+        return analysis
+
     # ---------- worker ----------
 
     def _run_session(self, runtime: SessionRuntime) -> None:
@@ -521,6 +658,8 @@ class ClassroomService:
             self._execute_event(runtime, ClassroomEvent(TRIGGER_INITIALIZATION))
             while True:
                 with runtime.lock:
+                    if runtime.status in _TERMINAL:
+                        break
                     if runtime.stop_requested:
                         self._finish(
                             runtime,
@@ -581,10 +720,12 @@ class ClassroomService:
                 with runtime.lock:
                     if (
                         not runtime.classroom.state.autonomous_mode
-                        and runtime.status not in _TERMINAL
+                        and runtime.status == SessionStatus.RUNNING
+                        and not runtime.stop_requested
                         and not runtime.manual_paused
                     ):
                         runtime.status = SessionStatus.PAUSED
+                        self._start_pause_clock(runtime)
                         runtime.pause_reason = "MAX_CONSECUTIVE_TIMEOUTS"
                         self._persist_session(runtime)
         except Exception as exc:
@@ -603,12 +744,24 @@ class ClassroomService:
                     ) + f"artifact_error: {type(exc).__name__}: {exc}"
                     self._persist_session(runtime)
 
+    def _wait_until_runnable(self, runtime: SessionRuntime) -> bool:
+        with runtime.lock:
+            while runtime.status == SessionStatus.PAUSED and not runtime.stop_requested:
+                remaining = self._remaining_wall_clock(runtime)
+                if remaining <= 0:
+                    break
+                runtime.condition.wait(timeout=min(0.5, remaining))
+            if runtime.status in _TERMINAL:
+                return False
+            if runtime.stop_requested or self._remaining_wall_clock(runtime) <= 0:
+                self._finish(runtime, SessionStatus.INTERRUPTED,
+                             runtime.stop_reason or "MAX_WALL_CLOCK_SECONDS")
+                return False
+            return True
+
     def _execute_event(self, runtime: SessionRuntime, event: ClassroomEvent) -> None:
         with runtime.lock:
-            if runtime.status in _TERMINAL:
-                return
-            if runtime.stop_requested or self._remaining_wall_clock(runtime) <= 0:
-                self._finish(runtime, SessionStatus.INTERRUPTED, runtime.stop_reason or 'MAX_WALL_CLOCK_SECONDS')
+            if not self._wait_until_runnable(runtime):
                 return
             if len(runtime.event_store) >= runtime.limits.max_events:
                 return
@@ -616,12 +769,11 @@ class ClassroomService:
             material_before = runtime.classroom.state.current_material
 
         started = time.perf_counter()
-        runtime.classroom._process_event(event)
-        entry = runtime.classroom._run_one_turn()
-        with runtime.lock:
-            if runtime.stop_requested or runtime.status in _TERMINAL or self._remaining_wall_clock(runtime) <= 0:
-                self._finish(runtime, SessionStatus.INTERRUPTED, runtime.stop_reason or 'MAX_WALL_CLOCK_SECONDS')
-                return
+        try:
+            runtime.classroom._process_event(event)
+            entry = runtime.classroom._run_one_turn()
+        except _TurnInterrupted:
+            return
         duration_ms = max(0, round((time.perf_counter() - started) * 1000))
         completed_at = utc_now()
 
@@ -671,8 +823,11 @@ class ClassroomService:
             status=event_status,
             error=error,
         )
-        runtime.event_store.append(record)
         with runtime.lock:
+            # Control check and publication must be atomic with pause/end.
+            if not self._wait_until_runnable(runtime):
+                return
+            runtime.event_store.append(record)
             if (
                 runtime.materials_complete_sequence is None
                 and runtime.classroom.state.all_materials_finished
@@ -723,7 +878,17 @@ class ClassroomService:
         # call so GET /sessions and GET /events never stall behind it.
         with runtime.analysis_lock:
             with runtime.lock:
-                if runtime.analysis is not None and runtime.analysis.analysis_status == 'COMPLETED':
+                if runtime.model_mode == ModelMode.REAL and (runtime.model_request_uncertain or runtime.stop_reason in {
+                    'MODEL_HARD_TIMEOUT', 'MODEL_TRANSPORT_UNKNOWN', 'MODEL_WORKER_FAILED',
+                    'MODEL_CANCELLED', 'SERVICE_RESTART_UNRECOVERABLE'}):
+                    runtime.analysis = runtime.analysis or AnalysisResult(
+                        sessionId=runtime.session_id, sourceVersionId=runtime.version_id,
+                        modelMode=runtime.model_mode.value, analysisStatus='FAILED',
+                        warnings=['Execution interrupted; explicit analysis required; no automatic model retry'])
+                    self._write_analysis_artifacts(runtime)
+                    self._write_result_artifact(runtime)
+                    return
+                if runtime.analysis is not None:
                     self._write_analysis_artifacts(runtime)
                     self._write_result_artifact(runtime)
                     return
@@ -732,7 +897,7 @@ class ClassroomService:
                 session_status = runtime.status.value
                 stop_reason = runtime.stop_reason
                 model_mode = runtime.model_mode.value
-            analysis = IssueAnalysisAgent(runtime.classroom.llm).analyze(
+            analysis = self._analyze_bounded(runtime.classroom.llm, allow_retry=False,
                     session_id=runtime.session_id,
                     version_id=runtime.version_id,
                     events=events,
@@ -786,6 +951,11 @@ class ClassroomService:
             "finishedAt": runtime.finished_at,
             "stopReason": runtime.stop_reason,
             "pauseReason": runtime.pause_reason,
+            "inFlightModelRequest": (dict(runtime.in_flight_model_request)
+                                     if runtime.in_flight_model_request else None),
+            "activeSeconds": self._elapsed(runtime),
+            "modelRequestUncertain": runtime.model_request_uncertain,
+            "analysisTimeoutSeconds": positive_timeout('F3_ANALYSIS_TIMEOUT_SECONDS', 300),
             "lastError": runtime.last_error,
             "limits": runtime.limits.model_dump(by_alias=True),
             "activeRoles": list(runtime.classroom.state.active_roles),
@@ -816,11 +986,32 @@ class ClassroomService:
                 if status in {"READY", "RUNNING", "PAUSED", "STOPPING"}:
                     record["status"] = SessionStatus.INTERRUPTED.value
                     record["stopReason"] = "SERVICE_RESTART_UNRECOVERABLE"
+                    record["inFlightModelRequest"] = None
                     record["finishedAt"] = utc_now()
                     atomic_text(path,
                         json.dumps(record, ensure_ascii=False, indent=2)
                     )
+                    result_path = path.parent / 'session_record.json'
+                    if result_path.exists():
+                        result = json.loads(result_path.read_text(encoding='utf-8'))
+                        result.update(session=record, executionStatus=record['status'])
+                        atomic_text(result_path, json.dumps(result, ensure_ascii=False))
                 session_id = record.get("sessionId")
+                attempt_path = path.parent / 'analysis_attempt.json'
+                if attempt_path.exists():
+                    attempt = json.loads(attempt_path.read_text(encoding='utf-8'))
+                    if attempt.get('status') == 'STARTED':
+                        attempt.update(status='UNKNOWN', finishedAt=utc_now())
+                        atomic_text(attempt_path, json.dumps(attempt, ensure_ascii=False))
+                        interrupted = AnalysisResult(sessionId=record['sessionId'],
+                            sourceVersionId=record['versionId'], modelMode=record.get('modelMode'),
+                            analysisStatus='FAILED', warnings=['ANALYSIS_INTERRUPTED_UNKNOWN: explicit retry required'])
+                        atomic_text(path.parent / 'issue_analysis.json', interrupted.model_dump_json(by_alias=True))
+                        result_path = path.parent / 'session_record.json'
+                        if result_path.exists():
+                            result = json.loads(result_path.read_text(encoding='utf-8'))
+                            result.update(analysisStatus='FAILED', analysisWarnings=interrupted.warnings)
+                            atomic_text(result_path, json.dumps(result, ensure_ascii=False))
                 request_key = record.get("requestKey")
                 if session_id:
                     self._archived[session_id] = record
@@ -836,6 +1027,7 @@ class ClassroomService:
         self, runtime: SessionRuntime, status: SessionStatus, stop_reason: str
     ) -> None:
         runtime.status = status
+        self._stop_pause_clock(runtime)
         runtime.stop_reason = stop_reason
         runtime.pause_reason = None
         runtime.finished_at = runtime.finished_at or utc_now()
@@ -851,14 +1043,29 @@ class ClassroomService:
         return None
 
     @staticmethod
+    def _start_pause_clock(runtime: SessionRuntime) -> None:
+        if runtime.paused_at is None:
+            runtime.paused_at = time.monotonic()
+
+    @staticmethod
+    def _stop_pause_clock(runtime: SessionRuntime) -> None:
+        if runtime.paused_at is not None:
+            runtime.paused_seconds += max(0, time.monotonic() - runtime.paused_at)
+            runtime.paused_at = None
+
+    @staticmethod
     def _elapsed(runtime: SessionRuntime) -> float:
         if not runtime.started_at:
             return 0.0
         text = runtime.started_at.replace("Z", "+00:00")
         start = datetime.fromisoformat(text)
-        return max(0.0, (datetime.now(timezone.utc) - start).total_seconds())
+        end = datetime.fromisoformat(runtime.finished_at.replace('Z', '+00:00')) if runtime.finished_at else datetime.now(timezone.utc)
+        pause = runtime.paused_seconds + (max(0, time.monotonic() - runtime.paused_at) if runtime.paused_at is not None else 0)
+        return max(0.0, (end - start).total_seconds() - pause)
 
     def _remaining_wall_clock(self, runtime: SessionRuntime) -> float:
+        if runtime.limits.max_wall_clock_seconds is None:
+            return float('inf')
         return runtime.limits.max_wall_clock_seconds - self._elapsed(runtime)
 
     @staticmethod

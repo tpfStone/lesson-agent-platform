@@ -3,6 +3,7 @@ import { ref, onUnmounted } from "vue";
 import { useRouter } from "vue-router";
 import axios from "axios";
 import LessonDocumentPreview from "./LessonDocumentPreview.vue";
+import DocumentWarnings from "./DocumentWarnings.vue";
 import type { LessonDocument } from "../types/lesson-document";
 
 interface DocxPreview {
@@ -36,23 +37,32 @@ const form = ref({
   content: "",
 });
 function chooseFile() {
+  if (saving.value) return;
   fileInput.value?.click();
 }
 let generation = 0;
 onUnmounted(() => {
   generation++;
 });
-async function selected(event: Event) {
-  const request = ++generation;
+function selected(event: Event) {
   const input = event.target as HTMLInputElement;
   const selectedFile = input.files?.[0] || null;
+  input.value = "";
+  if (selectedFile) void previewFile(selectedFile);
+}
+function dropped(event: DragEvent) {
+  const files = event.dataTransfer?.files;
+  if (files?.length) void previewFile(files[0]!);
+}
+async function previewFile(selectedFile: File) {
+  if (saving.value) return;
+  const request = ++generation;
   file.value = null;
   preview.value = null;
   error.value = "";
-  if (!selectedFile) return;
+  previewing.value = false;
   if (!selectedFile.name.toLowerCase().endsWith(".docx")) {
     error.value = "当前仅支持DOCX文件，PDF功能即将支持。";
-    input.value = "";
     return;
   }
   previewing.value = true;
@@ -86,6 +96,7 @@ async function save() {
   if (!file.value || !preview.value || saving.value || !form.value.title.trim())
     return;
   saving.value = true;
+  const request = generation;
   error.value = "";
   try {
     const data = new FormData();
@@ -107,6 +118,7 @@ async function save() {
         { timeout: 60000 },
       )
     ).data;
+    if (request !== generation) return;
     emit("imported", created);
     if (props.redirectOnSave)
       await router.push({
@@ -114,6 +126,7 @@ async function save() {
         query: { version: created.lesson.currentVersionId },
       });
   } catch (reason) {
+    if (request !== generation) return;
     error.value = axios.isAxiosError(reason)
       ? (reason.response?.data as { detail?: string })?.detail || reason.message
       : "教案保存失败";
@@ -124,7 +137,7 @@ async function save() {
 </script>
 
 <template>
-  <section class="import-panel">
+  <section class="import-panel" @dragover.prevent @drop.prevent="dropped">
     <div class="import-copy">
       <span>上传教案</span>
       <h2>{{ preview ? "确认教案信息" : "拖拽或点击上传DOCX" }}</h2>
@@ -134,6 +147,8 @@ async function save() {
       ref="fileInput"
       class="visually-hidden"
       type="file"
+      tabindex="-1"
+      aria-hidden="true"
       accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
       @change="selected"
     />
@@ -160,12 +175,12 @@ async function save() {
       <label class="wide"
         >课题<input v-model="form.topic" maxlength="200"
       /></label>
+      <DocumentWarnings class="wide" :warnings="preview.warnings">
+        <p>保存后可在教案空间下载原稿核对。</p>
+      </DocumentWarnings>
       <details class="wide import-preview">
         <summary>核对教案内容</summary>
-        <LessonDocumentPreview
-          :document="preview.structuredContent"
-          :warnings="preview.warnings"
-        />
+        <LessonDocumentPreview :document="preview.structuredContent" />
       </details>
       <div class="import-actions">
         <button type="button" class="change-file" @click="chooseFile">
@@ -240,23 +255,28 @@ async function save() {
   gap: 11px;
 }
 .import-form label {
+  min-width: 0;
   display: grid;
   gap: 5px;
   color: var(--color-text-secondary);
   font-size: 12px;
   font-weight: 700;
 }
-.import-form label.wide,
+.import-form > .wide,
 .import-actions {
   grid-column: 1/-1;
 }
 .import-form input {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
   min-height: 39px;
   padding: 0 10px;
   border: 1px solid #cdd9e9;
   border-radius: var(--radius-sm);
 }
 .import-actions {
+  flex-wrap: wrap;
   display: flex;
   justify-content: flex-end;
   gap: 9px;
@@ -286,6 +306,13 @@ async function save() {
   margin: 12px 0 0;
   color: var(--color-danger);
   font-size: 13px;
+}
+.import-form > * {
+  min-width: 0;
+  max-width: 100%;
+}
+.import-preview {
+  overflow-wrap: anywhere;
 }
 @media (max-width: 540px) {
   .import-form {

@@ -23,7 +23,7 @@ exit `$LASTEXITCODE
 "@.Replace('''$PSScriptRoot/scripts/stop-all.ps1''', "(Join-Path `$PSScriptRoot 'scripts/stop-all.ps1')") | Set-Content -LiteralPath $runner -Encoding UTF8
         $called = Join-Path $temporary 'taskkill-called.txt'
         if (Test-Path -LiteralPath $called) { Remove-Item -LiteralPath $called }
-        $output = @(& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $runner)
+        $output = @(& powershell.exe -NoProfile -File $runner)
         $exitCode = $LASTEXITCODE
         if ($exitCode -ne 1) { throw "Expected stop failure exit 1 after $failure; got $exitCode." }
         if (-not (Test-Path -LiteralPath $called)) { throw 'Expected taskkill branch was not reached.' }

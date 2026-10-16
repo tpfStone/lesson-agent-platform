@@ -17,6 +17,7 @@ from pydantic import Field, JsonValue, model_validator
 from paper4_pipeline.agents.prompts import load_prompt
 from paper4_pipeline.agents.protocols import AgentCallMetadata, AgentOutput
 from paper4_pipeline.control.rules import hard_rule_regressions
+from paper4_pipeline.domain.scope import enforce_scope, path_intersects_scope
 from paper4_pipeline.domain.models import (
     CritiqueItem, LessonPlanDocument, LessonPlanVersion, LessonTask,
     RewriteChange, RewriteOutcome, StrictModel, TokenUsage,
@@ -149,6 +150,7 @@ def materialize_patch(
     for edit in proposal.edits:
         prior_values[edit.path] = _replace(candidate, edit.path, edit.value)
     revised = LessonPlanDocument.model_validate(candidate)
+    enforce_scope(task, revised)
     if revised.metadata != document.metadata:
         raise ValueError("patch changed immutable metadata")
     regressions = hard_rule_regressions(document, revised, task, tolerance)
@@ -359,6 +361,7 @@ def patch_rewrite(
             },
             "field_contracts": field_contracts,
             "task_constraints": task.class_constraints,
+            "optimization_scope": task.optimization_scope.model_dump(mode="json") if task.optimization_scope else None,
         },
         output_schema=PatchProposal,
         stage="rewrite_patch",
@@ -401,6 +404,10 @@ def incremental_patch_rewrite(
     attempts = 0
     last_metadata: AgentCallMetadata | None = None
     for index, critique in enumerate(accepted):
+        if not path_intersects_scope(task, critique.target_path):
+            unresolved.append(critique.critique_id)
+            reasons[critique.critique_id] = "本条意见位于本次优化范围外，仅保留为建议，未调用改写模型。"
+            continue
         current = version.model_copy(update={"document": working})
         try:
             output = patch_rewrite(

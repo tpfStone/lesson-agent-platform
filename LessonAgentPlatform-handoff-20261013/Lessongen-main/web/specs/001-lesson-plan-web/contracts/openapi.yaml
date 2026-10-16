@@ -314,6 +314,8 @@ components:
         - $ref: '#/components/schemas/BaseLessonInput'
         - type: object
           properties:
+            optimizationScope:
+              $ref: '#/components/schemas/OptimizationScope'
             optimizationFocus:
               type: array
               maxItems: 20
@@ -323,6 +325,28 @@ components:
               maxItems: 20
               items: { type: string, minLength: 1, maxLength: 2000 }
       unevaluatedProperties: false
+
+    OptimizationScope:
+      description: Explicit content-field authorization. Local paths must resolve against the saved input; identity fields are immutable. Omitted legacy scopes are inferred only from exact field names, never free-form suggestions.
+      type: object
+      additionalProperties: false
+      required: [mode, editablePaths]
+      properties:
+        mode: { type: string, enum: [local, full] }
+        editablePaths:
+          type: array
+          maxItems: 100
+          items: { type: string, minLength: 2, maxLength: 1000, pattern: '^/[^/]+(/[^/]+)*$' }
+      allOf:
+        - if:
+            properties:
+              mode: { const: local }
+          then:
+            properties:
+              editablePaths: { minItems: 1 }
+          else:
+            properties:
+              editablePaths: { maxItems: 0 }
 
     JobLinks:
       type: object

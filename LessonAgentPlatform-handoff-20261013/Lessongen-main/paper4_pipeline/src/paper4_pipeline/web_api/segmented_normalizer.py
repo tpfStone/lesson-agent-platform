@@ -315,7 +315,10 @@ class SegmentedDocxNormalizer:
         # Duration is a task constraint. Preserve proportions, record the edit,
         # and never silently claim the source supplied the adjusted timings.
         total_minutes = sum(step.duration_minutes for step in steps)
-        if total_minutes != task_input.duration_minutes:
+        local = task_input.optimization_scope is not None and task_input.optimization_scope.mode == "local"
+        if total_minutes != task_input.duration_minutes and local:
+            warnings.append(f"原稿各环节时间合计 {total_minutes} 分钟，与本次课时不一致；局部规范化未调整原稿时间。")
+        if total_minutes != task_input.duration_minutes and not local:
             if len(steps) > task_input.duration_minutes:
                 raise ValueError(
                     "识别出的教学步骤数超过课时分钟数，无法无损分配时间；请人工整理原稿"
@@ -351,6 +354,8 @@ class SegmentedDocxNormalizer:
             **overview_data,
             procedure_steps=steps, teaching_artifacts=artifacts,
         )
+        from paper4_pipeline.web_api.source_preservation import checked_source_coverage
+        checked = checked_source_coverage(raw, document, task_input)
         return NormalizedLessonInput(
             source_sha256=raw.source_sha256,
             normalizer_prompt_version="segmented-v1",
@@ -361,6 +366,7 @@ class SegmentedDocxNormalizer:
                 ("file" if overview.textbook_version else "inferred"),
             },
             lesson_plan=document, preserved_content_map=preservation_map,
+            raw_locator_coverage=checked or {},
             warnings=warnings, usage=usage, estimated_cost=cost,
             model_metadata={"provider": self.provider.settings.provider,
                             "model": self.provider.settings.model_name,

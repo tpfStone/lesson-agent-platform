@@ -32,17 +32,23 @@ public class PlatformLessonService {
     private final LessonVersionWriteService writer;
     private final PlatformLessonDocumentService documents;
     private final CurrentUserService currentUser;
+    private final CapabilityAdmissionPolicy admission;
+    private final com.zone.lesoongen.auth.PlatformAccessService access;
 
     public PlatformLessonService(JdbcTemplate db, PlatformLessonDocumentService documents,
-            CurrentUserService currentUser, LessonVersionWriteService writer) {
+            CurrentUserService currentUser, LessonVersionWriteService writer,
+            CapabilityAdmissionPolicy admission, com.zone.lesoongen.auth.PlatformAccessService access) {
         this.writer = writer;
         this.db = db;
         this.documents = documents;
         this.currentUser = currentUser;
+        this.admission = admission;
+        this.access = access;
     }
 
     @Transactional
     public LessonDetail create(CreateLesson request) {
+        admission.requireNew(CapabilityAdmissionPolicy.Capability.STRUCTURE);
         return createInitialVersion(request, "IMPORT_TEXT",
                 LessonDocumentSupport.fromPlainText(request.content()), "FALLBACK",
                 "PLAIN_TEXT", List.of());
@@ -100,6 +106,8 @@ public class PlatformLessonService {
 
     @Transactional
     public LessonDetail addVersion(String lessonId, NewVersion request) {
+        access.requireOwnedLesson(lessonId);
+        admission.requireNew(CapabilityAdmissionPolicy.Capability.STRUCTURE);
         return addVersionFromModule(lessonId, request.expectedVersionId(), request.content(), "MANUAL", null);
     }
 

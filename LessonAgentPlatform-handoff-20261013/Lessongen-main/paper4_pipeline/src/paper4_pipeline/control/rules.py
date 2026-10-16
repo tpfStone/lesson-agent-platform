@@ -247,6 +247,24 @@ def check_lesson_plan(
         ),
         "references_resolved": True,  # enforced by LessonPlanDocument validation
     }
+    from paper4_pipeline.domain.scope import local_paths, outside_scope_changes, path_intersects_scope
+    if local_paths(task) is not None:
+        missing_codes = {"missing_learning_objectives", "missing_procedure_steps",
+                         "missing_curriculum_alignment", "empty_required_section"}
+        for violation in violations:
+            # Only an unchanged, pre-existing deficit outside the selected field
+            # becomes informational. Identity, duration and new defects stay hard.
+            path = "/" + violation.location
+            missing_duration = (violation.code == "duration_mismatch"
+                                and not task.initial_plan.procedure_steps and not document.procedure_steps)
+            if ((violation.code in missing_codes or missing_duration) and not path_intersects_scope(task, path)
+                    and _document_path_value(task.initial_plan, path) == _document_path_value(document, path)):
+                violation.severity = Severity.MEDIUM
+                violation.message = "原稿已有且位于本次范围外，仅提示：" + violation.message
+        outside = outside_scope_changes(task, document)
+        for path in outside:
+            add("out_of_scope_change", "候选改动了本次范围外的原稿字段。", path, Severity.CRITICAL)
+        checks["optimization_scope_preserved"] = not outside
     hard_severities = {Severity.HIGH, Severity.CRITICAL}
     passed = not any(item.severity in hard_severities for item in violations)
     return RuleCheckReport(

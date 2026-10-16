@@ -17,6 +17,7 @@ import time
 from typing import Callable, Dict, List, Optional
 
 from providers import create_provider
+from usage_meter import metered_operation
 from parsers import (
     parse_document, parse_example, scan_examples,
     list_available_plans, list_available_criteria,
@@ -232,6 +233,7 @@ def apply_grades_and_tree(result: dict) -> dict:
     return result
 
 
+@metered_operation('annotation')
 def run_annotation(
     base_dir: str,
     config: Dict,
@@ -356,7 +358,8 @@ def run_annotation(
     provider_name = config["llm"]["provider"]
     model_name = config["llm"].get("model", "")
     log(f"调用 LLM: {provider_name}/{model_name}")
-    provider = create_provider(provider_name, config)
+    provider_config = {**config, 'output': {**config.get('output', {}), 'dir': output_dir}}
+    provider = create_provider(provider_name, provider_config)
     raw = ""
     max_retry = 3
     for attempt in range(1, max_retry + 1):
@@ -408,7 +411,7 @@ def run_annotation(
     # === 生成改进建议（可选）===
     if suggest:
         log("生成改进建议（推理链 + 三库检索）…")
-        provider = create_provider(provider_name, config)
+        provider = create_provider(provider_name, provider_config)
         result = generate_suggestions(result, plan_text, provider,
                                       subject=subject, grade=grade_num)
 

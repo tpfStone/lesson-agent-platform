@@ -13,6 +13,7 @@ import re
 from typing import Optional
 
 from ..agents.base import BaseAgent
+from ..llm.metering import metered_operation
 from .state import ClassState, ManagerDecision
 
 MANAGER_SYSTEM_PROMPT = """你是 SimClass 虚拟课堂中隐藏的 Manager（meta-agent）。
@@ -66,6 +67,7 @@ class Manager:
 
     # ---------- 决策 ----------
 
+    @metered_operation('manager')
     def decide(self, state: ClassState, feedback: Optional[str] = None) -> ManagerDecision:
         messages = [
             {"role": "system", "content": self._system_prompt(state)},

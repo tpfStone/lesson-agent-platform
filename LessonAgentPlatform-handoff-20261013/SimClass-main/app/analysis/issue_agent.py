@@ -6,6 +6,8 @@ from typing import Any
 from app.contracts.analysis import AnalysisResult, IssueRecord
 from app.contracts.event import ClassroomEventRecord
 from app.llm.base import LLMError
+from app.llm.provider import ModelRequestUncertain
+from app.llm.metering import metered_operation
 from .evidence_validator import EvidenceValidator
 from .issue_consolidator import IssueConsolidator
 
@@ -46,6 +48,7 @@ class IssueAnalysisAgent:
         self.validator = validator or EvidenceValidator()
         self.consolidator = consolidator or IssueConsolidator(max_final_issues=5)
 
+    @metered_operation('issue_analysis')
     def analyze(
         self,
         *,
@@ -126,6 +129,7 @@ class IssueAnalysisAgent:
         result.analysis_status = 'FAILED' if failed_chunks == len(chunks) else ('PARTIAL' if failed_chunks else 'COMPLETED')
         return result
 
+    @metered_operation('issue_analysis_chunk')
     def _analyze_validated_chunk(
         self,
         events: list[ClassroomEventRecord],
@@ -214,6 +218,8 @@ class IssueAnalysisAgent:
                 ],
                 temperature=0.1,
             )
+        except ModelRequestUncertain:
+            raise
         except LLMError as exc:
             return [], f"IssueAnalysisAgent LLM call failed: {exc}"
         except Exception as exc:

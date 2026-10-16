@@ -71,7 +71,13 @@ interface ClassroomRecord {
   analysisWarnings?: string[];
   status?: string;
   modelMode?: string;
-  session?: { status?: string; modelMode?: string; activeRoles?: string[] };
+  session?: {
+    status?: string;
+    modelMode?: string;
+    activeRoles?: string[];
+    stopReason?: string;
+    analysisTimeoutSeconds?: number;
+  };
   events?: ClassroomEvent[];
   materials?: Array<{ materialId?: string; title?: string }>;
   statistics?: {
@@ -162,6 +168,7 @@ const messageDraft = ref("");
 const sending = ref(false);
 const controlling = ref(false);
 const liveError = ref("");
+const endError = ref("");
 const endDialogOpen = ref(false);
 const chatList = ref<HTMLElement | null>(null);
 const hasNewEvents = ref(false);
@@ -195,6 +202,7 @@ const statusLabel = (status?: string) =>
     RUNNING: "进行中",
     PAUSED: "已暂停",
     QUEUED: "准备中",
+    STOPPING: "正在结束",
     RECONCILING: "核对远端状态",
     UNKNOWN: "远端状态待确认",
   })[status || ""] || "状态未知";
@@ -217,18 +225,49 @@ const issues = computed(() => detail.value?.sessionRecord?.issues || []);
 const analysisComplete = computed(
   () => detail.value?.sessionRecord?.analysisStatus === "COMPLETED",
 );
+const interruptionNotice = computed(() => {
+  const reason = detail.value?.sessionRecord?.session?.stopReason;
+  if (reason === "MODEL_HARD_TIMEOUT")
+    return "模型请求超过安全时限，课堂已中止；已有记录已保存，系统未自动重试。";
+  if (reason === "SERVICE_RESTART_UNRECOVERABLE")
+    return "服务重启使课堂中断；已有记录已保存，系统未自动恢复模型调用。";
+  if (
+    [
+      "MODEL_TRANSPORT_UNKNOWN",
+      "MODEL_WORKER_FAILED",
+      "MODEL_CANCELLED",
+    ].includes(reason || "")
+  )
+    return "模型请求中断或结果未知；已有课堂记录已保存，系统未自动重试。";
+  return "";
+});
+const analysisNotice = computed(() => {
+  const warnings = detail.value?.sessionRecord?.analysisWarnings || [];
+  if (warnings.some((warning) => warning.includes("ANALYSIS_HARD_TIMEOUT")))
+    return "问题分析超过安全时限，分析工作已停止；课堂记录保持不变。";
+  if (warnings.some((warning) => warning.includes("UNKNOWN")))
+    return "上次问题分析的结果未知，系统未自动重试；课堂记录保持不变。";
+  return "";
+});
 const analyzing = ref(false);
 async function retryAnalysis() {
   if (!detail.value || analyzing.value) return;
   const selected = detail.value.simulationRunId;
   const selectedLessonId = lessonId.value;
+  error.value = "";
   analyzing.value = true;
   try {
     const next = (
       await axios.post<SimulationDetail>(
         `/api/platform/lessons/${encodeURIComponent(selectedLessonId)}/simulations/${encodeURIComponent(selected)}/analyze`,
         {},
-        { timeout: 90000 },
+        {
+          timeout:
+            ((detail.value.sessionRecord?.session?.analysisTimeoutSeconds ||
+              300) +
+              60) *
+            1000,
+        },
       )
     ).data;
     if (
@@ -237,9 +276,30 @@ async function retryAnalysis() {
     )
       detail.value = next;
   } catch (reason) {
-    error.value = axios.isAxiosError(reason)
-      ? reason.response?.data?.detail || reason.message
-      : "补充分析失败";
+    if (
+      lessonId.value === selectedLessonId &&
+      detail.value?.simulationRunId === selected
+    ) {
+      error.value = axios.isAxiosError(reason)
+        ? reason.response?.data?.detail || reason.message
+        : "补充分析失败";
+      // A failed explicit attempt can persist new warnings without changing the classroom.
+      // Refresh only that archive; never send another analysis request automatically.
+      try {
+        const latest = (
+          await axios.get<SimulationDetail>(
+            `/api/platform/lessons/${encodeURIComponent(selectedLessonId)}/simulations/${encodeURIComponent(selected)}`,
+          )
+        ).data;
+        if (
+          lessonId.value === selectedLessonId &&
+          detail.value?.simulationRunId === selected
+        )
+          detail.value = latest;
+      } catch {
+        // Keep the original failure visible when its saved record cannot be read yet.
+      }
+    }
   } finally {
     analyzing.value = false;
   }
@@ -371,8 +431,17 @@ const downloads = computed(() =>
       ]
     : [],
 );
-const liveStatus = computed(
-  () => classroom.value?.status || launch.value?.state || "QUEUED",
+const liveStatus = computed(() =>
+  launch.value?.state === "STOPPING"
+    ? "STOPPING"
+    : classroom.value?.status || launch.value?.state || "QUEUED",
+);
+const canEnd = computed(
+  () =>
+    !!launch.value &&
+    ["QUEUED", "RUNNING", "RECONCILING", "UNKNOWN"].includes(
+      launch.value.state,
+    ),
 );
 const liveRoleLabels = computed(() =>
   (
@@ -472,13 +541,21 @@ async function sendMessage() {
   }
 }
 async function classroomAction(action: "pause" | "resume" | "end") {
-  if (!launch.value?.f3SessionId || controlling.value) return;
+  if (!launch.value || controlling.value) return;
+  if (
+    action === "end"
+      ? !canEnd.value
+      : !launch.value.f3SessionId || liveStatus.value === "STOPPING"
+  )
+    return;
+  const id = launch.value.launchId;
   controlling.value = true;
   liveError.value = "";
+  if (action === "end") endError.value = "";
   try {
     classroom.value = (
       await axios.post<typeof classroom.value>(
-        `/api/platform/simulation-launches/${encodeURIComponent(launch.value.launchId)}/${action}`,
+        `/api/platform/simulation-launches/${encodeURIComponent(id)}/${action}`,
       )
     ).data;
     if (action === "end") endDialogOpen.value = false;
@@ -486,7 +563,17 @@ async function classroomAction(action: "pause" | "resume" | "end") {
     liveError.value = axios.isAxiosError(reason)
       ? (reason.response?.data as { detail?: string })?.detail || reason.message
       : "课堂操作未完成";
+    if (action === "end") endError.value = liveError.value;
   } finally {
+    if (action === "end") {
+      await poll(id);
+      if (
+        ["STOPPING", "INTERRUPTED", "COMPLETED", "FAILED"].includes(
+          launch.value?.state || "",
+        )
+      )
+        endDialogOpen.value = false;
+    }
     controlling.value = false;
   }
 }
@@ -591,7 +678,7 @@ async function poll(id: string) {
     launch.value = current;
     if (
       current.f3SessionId &&
-      ["RUNNING", "RECONCILING", "UNKNOWN"].includes(current.state)
+      ["RUNNING", "RECONCILING", "UNKNOWN", "STOPPING"].includes(current.state)
     )
       await refreshClassroom(id);
     if (current.state === "COMPLETED" || current.state === "INTERRUPTED") {
@@ -641,6 +728,8 @@ async function start() {
   if (starting.value || !lessonId.value || !versionId.value) return;
   starting.value = true;
   error.value = "";
+  endError.value = "";
+  liveError.value = "";
   try {
     classroom.value = null;
     liveEvents.value = [];
@@ -881,7 +970,9 @@ onBeforeUnmount(() => {
             statusLabel(liveStatus)
           }}</span>
         </div>
-        <p v-if="liveError" class="error" role="alert">{{ liveError }}</p>
+        <p v-if="endError || liveError" class="error" role="alert">
+          {{ endError || liveError }}
+        </p>
         <div v-if="launch?.f3SessionId" class="live-layout">
           <BaseCard class="chat-card">
             <div ref="chatList" class="chat-list" aria-live="polite">
@@ -988,7 +1079,7 @@ onBeforeUnmount(() => {
         <p v-else class="subtle">
           正在建立课堂会话，准备完成后会显示实时记录。
         </p>
-        <div v-if="launch?.f3SessionId" class="live-actions">
+        <div v-if="launch" class="live-actions">
           <button
             v-if="liveStatus === 'RUNNING'"
             type="button"
@@ -1008,7 +1099,7 @@ onBeforeUnmount(() => {
             继续课堂
           </button>
           <button
-            v-if="['RUNNING', 'PAUSED'].includes(liveStatus)"
+            v-if="canEnd"
             type="button"
             class="v2-button v2-button--secondary"
             :disabled="controlling"
@@ -1076,6 +1167,9 @@ onBeforeUnmount(() => {
         </div>
         <p v-if="detail.f3ModelContent === 'MOCK'" class="mock-notice">
           这次使用模拟回复，供流程测试；正式使用请重新启动真实模型推演。
+        </p>
+        <p v-if="interruptionNotice" role="status" class="mock-notice">
+          {{ interruptionNotice }}
         </p>
         <div class="result-stats">
           <div>
@@ -1194,7 +1288,11 @@ onBeforeUnmount(() => {
             发现的问题 <span>{{ issues.length }}</span>
           </h3>
           <p v-if="!analysisComplete" class="subtle">
-            课堂执行记录已保存，问题分析尚未完成或仍需重试。
+            {{
+              analysisNotice ||
+              "课堂执行记录已保存，问题分析尚未完成或仍需重试。"
+            }}
+            重新分析会再次请求模型。
           </p>
           <button
             v-if="!analysisComplete"

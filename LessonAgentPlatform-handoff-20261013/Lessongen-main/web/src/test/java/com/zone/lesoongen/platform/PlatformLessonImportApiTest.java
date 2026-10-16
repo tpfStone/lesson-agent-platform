@@ -126,6 +126,73 @@ class PlatformLessonImportApiTest {
     }
 
     @Test
+    void characterLimitIsExplicitForPreviewAndSaveAndLeavesNoRows() throws Exception {
+        Integer lessonsBefore = db.queryForObject("SELECT COUNT(*) FROM platform_lesson", Integer.class);
+        Integer sourcesBefore = db.queryForObject("SELECT COUNT(*) FROM platform_lesson_source_document", Integer.class);
+        MockMultipartFile oversized = characterDocument(100_001);
+        for (String endpoint : new String[] { "/imports/docx/preview", "/imports/docx" }) {
+            mvc.perform(multipart("/api/platform/lessons" + endpoint).file(oversized))
+                    .andExpect(status().isUnprocessableEntity())
+                    .andExpect(jsonPath("$.code").value("DOCX_CONTENT_TOO_LONG"))
+                    .andExpect(jsonPath("$.detail").value(org.hamcrest.Matchers.containsString("100000")));
+        }
+        assertEquals(lessonsBefore, db.queryForObject("SELECT COUNT(*) FROM platform_lesson", Integer.class));
+        assertEquals(sourcesBefore, db.queryForObject("SELECT COUNT(*) FROM platform_lesson_source_document", Integer.class));
+    }
+
+    @Test
+    void exactlyOneHundredThousandCharactersCanBePreviewed() throws Exception {
+        mvc.perform(multipart("/api/platform/lessons/imports/docx/preview").file(characterDocument(100_000)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.contentLength").value(100_000));
+    }
+
+    private static MockMultipartFile characterDocument(int size) throws Exception {
+        // Varied text avoids confusing the content limit with ZIP expansion protection.
+        java.util.Random random = new java.util.Random(16);
+        StringBuilder text = new StringBuilder("教学过程：");
+        while (text.length() < size) text.append((char) (0x4e00 + random.nextInt(2000)));
+        try (XWPFDocument doc = new XWPFDocument(); ByteArrayOutputStream bytes = new ByteArrayOutputStream()) {
+            doc.createParagraph().createRun().setText(text.toString());
+            doc.write(bytes);
+            return new MockMultipartFile("file", "字符边界.docx", DOCX_MEDIA, bytes.toByteArray());
+        }
+    }
+
+    @Test
+    void missingTeachingProcessIsRejectedWithoutSavingOriginal() throws Exception {
+        Integer before = db.queryForObject("SELECT COUNT(*) FROM platform_lesson_source_document", Integer.class);
+        for (String text : new String[] { "这是一份说明文件，尚未写教案。", "教学过程",
+                "教学过程\n作业设计\n完成课后练习", "（三）教学过程：\n（四）教学反思\n有待完善" }) {
+            MockMultipartFile file = proseDocument(text);
+            for (String endpoint : new String[] { "/imports/docx/preview", "/imports/docx" }) {
+                mvc.perform(multipart("/api/platform/lessons" + endpoint).file(file))
+                        .andExpect(status().isUnprocessableEntity())
+                        .andExpect(jsonPath("$.code").value("DOCX_TEACHING_PROCESS_REQUIRED"))
+                        .andExpect(jsonPath("$.detail").value(org.hamcrest.Matchers.containsString("教学过程")));
+            }
+        }
+        assertEquals(before, db.queryForObject("SELECT COUNT(*) FROM platform_lesson_source_document", Integer.class));
+    }
+
+    @Test
+    void teachingProcessCanUseProseRatherThanATable() throws Exception {
+        for (String text : new String[] { "一、教学过程\n教师提出问题，学生合作探究。", "教学过程：教师提出问题，学生回答。", "Lesson Procedure\nStudents discuss their answers.",
+                "（三）教学过程\n教师提问，学生回答。", "(3) 教学过程：\n1. 教师提问，学生讨论", "## 三、教学过程\n导入\n教师展示问题，学生思考。" }) {
+            mvc.perform(multipart("/api/platform/lessons/imports/docx/preview").file(proseDocument(text)))
+                    .andExpect(status().isOk());
+        }
+    }
+
+    private static MockMultipartFile proseDocument(String text) throws Exception {
+        try (XWPFDocument doc = new XWPFDocument(); ByteArrayOutputStream bytes = new ByteArrayOutputStream()) {
+            for (String paragraph : text.split("\n")) doc.createParagraph().createRun().setText(paragraph);
+            doc.write(bytes);
+            return new MockMultipartFile("file", "过程检查.docx", DOCX_MEDIA, bytes.toByteArray());
+        }
+    }
+
+    @Test
     void confirmedImportCreatesV0MetadataAndDownloadableOriginal() throws Exception {
         byte[] original = docxWithTextAndTable();
         MockMultipartFile file = new MockMultipartFile("file", "原始教案.docx", DOCX_MEDIA, original);

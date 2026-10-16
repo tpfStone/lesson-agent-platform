@@ -41,10 +41,12 @@ public class PlatformLessonImportService {
     private final AppProperties properties;
     private final JdbcTemplate db;
     private final Clock clock;
+    private final CapabilityAdmissionPolicy admission;
     private final org.springframework.transaction.support.TransactionTemplate transactions;
 
     public PlatformLessonImportService(PlatformLessonService lessons, DocxLessonExtractor extractor,
-            StoragePort storage, AppProperties properties, JdbcTemplate db, Clock clock, org.springframework.transaction.PlatformTransactionManager transactionManager) {
+            StoragePort storage, AppProperties properties, JdbcTemplate db, Clock clock, org.springframework.transaction.PlatformTransactionManager transactionManager,
+            CapabilityAdmissionPolicy admission) {
         this.transactions = new org.springframework.transaction.support.TransactionTemplate(transactionManager);
         this.lessons = lessons;
         this.extractor = extractor;
@@ -52,9 +54,11 @@ public class PlatformLessonImportService {
         this.properties = properties;
         this.db = db;
         this.clock = clock;
+        this.admission = admission;
     }
 
     public DocxPreview preview(MultipartFile file) {
+        admission.requireNew(CapabilityAdmissionPolicy.Capability.STRUCTURE);
         ExtractedDocument extracted = extractor.extract(file, properties.maxUploadBytes());
         return new DocxPreview(extracted.originalFilename(), extracted.sizeBytes(),
                 extracted.extractedContent(), extracted.extractedContent().length(),
@@ -62,6 +66,7 @@ public class PlatformLessonImportService {
     }
 
     public LessonDetail importDocx(MultipartFile file, CreateLesson request) {
+        admission.requireNew(CapabilityAdmissionPolicy.Capability.STRUCTURE);
         // Re-parse at confirmation time: preview is intentionally stateless and cannot be trusted as persistence input.
         ExtractedDocument extracted = extractor.extract(file, properties.maxUploadBytes());
         CreateLesson normalized = normalizeDocxRequest(extracted, request);

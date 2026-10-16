@@ -87,6 +87,24 @@ class PlatformIssueApiTest {
     }
 
     @Test
+    void laterVersionRechecksOlderIssueWithoutChangingPastDecision() {
+        String issueId = insertIssue("F1", "MEDIUM", "OPEN", "旧稿中的目标问题");
+        String first = lessons.addVersion(lessonId,
+                new PlatformLessonController.NewVersion(versionId, "第一轮修改目标"))
+                .lesson().currentVersionId();
+        issueService.revalidate(lessonId, first, issueId,
+                new PlatformIssueController.Resolution(0, "RESOLVED", "第一轮已核对"));
+        String second = lessons.addVersion(lessonId,
+                new PlatformLessonController.NewVersion(first, "再次修改教学目标"))
+                .lesson().currentVersionId();
+        var pending = issueService.revalidations(lessonId, second);
+        assertEquals(1, pending.size());
+        assertEquals(issueId, pending.get(0).get("issue_id"));
+        assertEquals("PENDING", pending.get(0).get("status"));
+        assertEquals("RESOLVED", issueService.revalidations(lessonId, first).get(0).get("status"));
+    }
+
+    @Test
     void listSupportsFiltersAndPagination() throws Exception {
         insertIssue("F3", "HIGH", "OPEN", "课堂参与不足");
         insertIssue("F1", "LOW", "RESOLVED", "目标表述不清");

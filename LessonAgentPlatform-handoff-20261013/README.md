@@ -9,6 +9,8 @@
 - 统一教案空间：使用同一 `lessonId/versionId` 管理 DOCX、版本及跨模块结果；
 - 公共问题池：汇聚 F1/F3/F4 问题，并向 F2/F4 提供上下文。
 
+2026-10-15—17 的结构生命周期修复已通过本阶段开发验收。完成情况、测试依据和后续安排统一见 [验收总报告](docs/ACCEPTANCE_RESULTS_20261017.md)；功能开关、本机统一入口、超时和回退命令见 [Windows 开发运行与维护](docs/WINDOWS_DEVELOPMENT_OPERATIONS.md)。原始需求见 [2026-10-13 交接文档](../前端与教案结构生命周期问题_项目交接文档_20261013.md)。
+
 ## 系统结构
 
 ```mermaid
@@ -22,7 +24,7 @@ flowchart TD
     J --> N[F4 API :8000]
 ```
 
-所有后端服务默认只监听 `127.0.0.1`。服务器公网部署时应由 Nginx 提供 HTTPS、静态页面及 `/api/` 反向代理，不要把 8000–8003、8080 直接暴露到公网。
+本阶段按 Windows、每模块单实例进行开发验收，实际服务监听地址以配置和端口检查为准。可选 Nginx 入口固定监听本机 `127.0.0.1:18080`；公网部署、HTTPS 和容量指标属于后续安排，不要直接公开 8000–8003、8080 内部端口。
 
 ## 目录
 
@@ -33,8 +35,8 @@ LessonAgentPlatform-Release/
 ├─ SimClass-main/              # F3 完整课堂模拟 API
 ├─ NoviceTeacher-AI-main/      # F4 协同共析 API
 ├─ scripts/                    # 启动、停止和健康检查
-├─ docs/                       # Windows/Linux 安装说明
-├─ deploy/nginx/               # Linux Nginx 示例
+├─ docs/                       # 验收汇总、维护与安装说明
+├─ deploy/nginx/               # Windows 本机入口与 Linux 示例
 ├─ .env.example                # 无密钥配置模板
 └─ .gitignore
 ```
@@ -75,19 +77,19 @@ LessonAgentPlatform-Release/
 完成首次安装后，在项目根目录执行：
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-all.ps1
+powershell -NoProfile -File .\scripts\start-all.ps1
 ```
 
 检查状态：
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\health-check.ps1
+powershell -NoProfile -File .\scripts\health-check.ps1
 ```
 
 停止：
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\stop-all.ps1
+powershell -NoProfile -File .\scripts\stop-all.ps1
 ```
 
 日志位于：
@@ -164,7 +166,7 @@ npm run build
 - F3 显示 MOCK：未设置 `API_KEY` 或 `F3_MODEL_MODE` 不是 `REAL`；
 - F4 无法生成建议：检查 `LLM_API_KEY`、额度和 `LLM_BASE_URL`；
 - Flyway 报重复版本：不要同时放入两份同版本 migration；保持当前 MySQL/H2 分目录结构；
-- PowerShell 禁止脚本：使用命令中的 `-ExecutionPolicy Bypass`，不要全局降低执行策略。
+- PowerShell 禁止脚本：用 `Get-ExecutionPolicy -List` 检查有效策略，在允许运行本地脚本的终端执行；不要全局降低执行策略。
 
 ## 安全说明
 

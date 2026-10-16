@@ -129,6 +129,12 @@ public class DocxLessonExtractor {
                     "Word 文件损坏或无法解析，请重新导出为标准 .docx 后再试");
         }
 
+        // Projection validates the structure first. Translate its size error at the
+        // import boundary so it cannot fall through to the generic 400 handler.
+        if (LessonDocumentValidator.validate(structured).errors().contains("DOCUMENT_TOO_LARGE")) {
+            throw new AppException(HttpStatus.UNPROCESSABLE_ENTITY, "DOCX_CONTENT_TOO_LONG",
+                    "提取后的教案正文超过 100000 字符限制");
+        }
         String content = LessonDocumentProjection.project(structured).content();
         if (content.isBlank()) {
             throw new AppException(HttpStatus.UNPROCESSABLE_ENTITY, "DOCX_EMPTY_CONTENT",
@@ -138,7 +144,38 @@ public class DocxLessonExtractor {
             throw new AppException(HttpStatus.UNPROCESSABLE_ENTITY, "DOCX_CONTENT_TOO_LONG",
                     "提取后的教案正文超过 100000 字符限制");
         }
+        boolean teachingTable = structured.blocks().stream().anyMatch(block ->
+                block.teachingProcess() != null && !block.teachingProcess().rows().isEmpty());
+        boolean teachingProse = hasTeachingProse(content);
+        if (!teachingTable && !teachingProse) {
+            throw new AppException(HttpStatus.UNPROCESSABLE_ENTITY, "DOCX_TEACHING_PROCESS_REQUIRED",
+                    "未识别到教学过程。请补充含具体活动的“教学过程”章节，或含教师活动、学生活动的教学表格后重新上传。");
+        }
         return new ExtractedDocument(filename, bytes.length, content, structured, List.copyOf(warnings));
+    }
+
+    private static boolean hasTeachingProse(String content) {
+        var processHeading = java.util.regex.Pattern.compile(
+                "(?i)^(?:教学过程|教学流程|教学活动|教学步骤|课堂活动|lesson procedure|teaching procedure)(?:[：:](.*))?$");
+        var otherSection = java.util.regex.Pattern.compile(
+                "(?i)^(?:基本信息|课程信息|教学依据|教材分析|学情分析|教学目标|学习目标|教学重点|教学难点|教学准备|"
+                + "学习评价|作业设计|课后作业|板书设计|教学反思|课后反思|评价设计|达成证据|homework|reflection|assessment|objectives)(?:[：:].*)?$");
+        boolean inside = false;
+        for (String raw : content.split("\\n")) {
+            String line = raw.strip().replaceFirst("^#{1,6}\\s*", "")
+                    .replaceFirst("^(?:[一二三四五六七八九十百0-9]+[、.．]|[（(][一二三四五六七八九十百0-9]+[）)])\\s*", "");
+            if (line.isBlank()) continue;
+            var heading = processHeading.matcher(line);
+            if (heading.matches()) {
+                inside = true;
+                line = heading.group(1) == null ? "" : heading.group(1).strip();
+                if (line.isBlank()) continue;
+            }
+            // A following chapter cannot supply the missing process activity.
+            if (otherSection.matcher(line).matches()) { inside = false; continue; }
+            if (inside && !line.matches("(?:导入|新课导入|合作探究|课堂小结|巩固练习|总结)[：:]?")) return true;
+        }
+        return false;
     }
 
     static String safeFilename(String input) {

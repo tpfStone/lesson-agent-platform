@@ -36,6 +36,23 @@ STATUS_COLORS = {
 }
 
 
+def _font_family(r_pr, family):
+    fonts = r_pr.find(qn('w:rFonts'))
+    if fonts is None:
+        fonts = OxmlElement('w:rFonts')
+        r_pr.insert(0, fonts)
+    for attribute in list(fonts.attrib):
+        if attribute.lower().endswith('theme'):
+            del fonts.attrib[attribute]
+    for script in ('ascii', 'hAnsi', 'eastAsia', 'cs'):
+        fonts.set(qn('w:' + script), family)
+
+
+def _add_icon(paragraph, icon):
+    run = paragraph.add_run(icon + ' ')
+    _font_family(run._element.get_or_add_rPr(), 'Segoe UI Emoji')
+
+
 def _add_annotation_block(doc, annotation: Dict):
     """添加一个带左边框的批注卡片"""
     status = annotation.get("评价", "")
@@ -93,7 +110,8 @@ def _add_annotation_block(doc, annotation: Dict):
     basis = annotation.get('依据来源', '')
     if basis:
         p6 = doc.add_paragraph()
-        t = p6.add_run(f"\U0001F4DA 依据来源：{basis}")
+        _add_icon(p6, '\U0001F4DA')
+        t = p6.add_run(f"依据来源：{basis}")
         t.font.size = Pt(9)
         t.font.color.rgb = RGBColor(0x8E, 0x44, 0xAD)
 
@@ -101,7 +119,8 @@ def _add_annotation_block(doc, annotation: Dict):
     method_ref = annotation.get('教学法参考', '')
     if method_ref:
         p6b = doc.add_paragraph()
-        tm = p6b.add_run(f"\U0001F3EB 教学法参考：{method_ref}")
+        _add_icon(p6b, '\U0001F3EB')
+        tm = p6b.add_run(f"教学法参考：{method_ref}")
         tm.font.size = Pt(9)
         tm.font.color.rgb = RGBColor(0x00, 0x8A, 0x00)
 
@@ -109,20 +128,48 @@ def _add_annotation_block(doc, annotation: Dict):
     detail = annotation.get('细化建议', '')
     if detail:
         p7 = doc.add_paragraph()
-        d = p7.add_run(f"\U0001F4A1 细化建议：{detail}")
+        _add_icon(p7, '\U0001F4A1')
+        d = p7.add_run(f"细化建议：{detail}")
         d.font.size = Pt(10)
         d.font.color.rgb = C_PURPLE
 
 
 def _setup_font(doc):
-    """设置默认字体为微软雅黑"""
+    """Only generated reports: explicit defaults remain stable when edited in Word."""
     style = doc.styles['Normal']
-    style.font.name = '微软雅黑'
+    _font_family(style.element.get_or_add_rPr(), 'SimSun')
     style.font.size = Pt(10.5)
-    rPr = style.element.get_or_add_rPr()
-    rFonts = OxmlElement('w:rFonts')
-    rFonts.set(qn('w:eastAsia'), '微软雅黑')
-    rPr.append(rFonts)
+    for name in ('Title', *(f'Heading {index}' for index in range(1, 10))):
+        heading_style = doc.styles[name]
+        _font_family(heading_style.element.get_or_add_rPr(), 'SimHei')
+        heading_style.font.color.rgb = RGBColor(0, 0, 0)
+        border = heading_style.element.find('w:pPr/w:pBdr', heading_style.element.nsmap)
+        if border is not None:
+            border.getparent().remove(border)
+    defaults = doc.styles.element.find(qn('w:docDefaults'))
+    if defaults is None:
+        defaults = OxmlElement('w:docDefaults')
+        doc.styles.element.insert(0, defaults)
+    run_default = defaults.find(qn('w:rPrDefault'))
+    if run_default is None:
+        run_default = OxmlElement('w:rPrDefault')
+        defaults.append(run_default)
+    r_pr = run_default.find(qn('w:rPr'))
+    if r_pr is None:
+        r_pr = OxmlElement('w:rPr')
+        run_default.append(r_pr)
+    _font_family(r_pr, 'SimSun')
+
+
+def _format_generated_runs(doc):
+    paragraphs = list(doc.paragraphs)
+    paragraphs.extend(paragraph for table in doc.tables for row in table.rows
+                      for cell in row.cells for paragraph in cell.paragraphs)
+    for paragraph in paragraphs:
+        family = 'SimHei' if paragraph.style.name == 'Title' or paragraph.style.name.startswith('Heading') else 'SimSun'
+        for run in paragraph.runs:
+            if run.font.name != 'Segoe UI Emoji':
+                _font_family(run._element.get_or_add_rPr(), family)
 
 
 def generate_docx(result: Dict, output_path: str) -> str:
@@ -189,7 +236,7 @@ def generate_docx(result: Dict, output_path: str) -> str:
 
     # 逐维度（按一级维度分组：一级维度作章节，二级维度作小节）
     doc.add_heading("逐维度详细批注", level=1)
-    for g in groups:
+    for group_index, g in enumerate(groups):
         doc.add_heading(f"{g['一级维度']}（{g['得分']}/{g['满分']} 分）", level=1)
         for dim in g["维度列表"]:
             grade = dim.get("等级", "")
@@ -203,8 +250,10 @@ def generate_docx(result: Dict, output_path: str) -> str:
             for ann in dim.get("批注列表", []):
                 _add_annotation_block(doc, ann)
 
-        doc.add_page_break()
+        if group_index + 1 < len(groups):
+            doc.add_page_break()
 
+    _format_generated_runs(doc)
     os.makedirs(os.path.dirname(output_path) if os.path.dirname(output_path) else ".", exist_ok=True)
     try:
         doc.save(output_path)

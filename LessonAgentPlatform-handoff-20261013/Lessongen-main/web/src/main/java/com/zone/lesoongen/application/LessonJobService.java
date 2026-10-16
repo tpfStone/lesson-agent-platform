@@ -17,8 +17,11 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.web.multipart.MultipartFile;
 
 import tools.jackson.core.JacksonException;
@@ -57,11 +60,14 @@ public class LessonJobService {
     private final ObjectMapper mapper;
     private final Clock clock;
     private final CurrentUserService currentUser;
+    private final JdbcTemplate db;
+    private final com.zone.lesoongen.platform.CapabilityAdmissionPolicy admission;
 
     public LessonJobService(LessonJobRepository jobs, LessonSourceFileRepository sources,
             LessonArtifactRepository artifacts, StoragePort storage, JobEventService events,
             AppProperties properties, ObjectMapper mapper, Clock clock,
-            CurrentUserService currentUser) {
+            CurrentUserService currentUser, JdbcTemplate db,
+            com.zone.lesoongen.platform.CapabilityAdmissionPolicy admission) {
         this.jobs = jobs;
         this.sources = sources;
         this.artifacts = artifacts;
@@ -73,12 +79,15 @@ public class LessonJobService {
         this.mapper = mapper;
         this.clock = clock;
         this.currentUser = currentUser;
+        this.db = db;
+        this.admission = admission;
     }
 
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public LessonResponses.JobAccepted createGenerate(LessonRequests.Generate input,
             String idempotencyKey) {
         validateIdempotencyKey(idempotencyKey);
+        lockSubmissionOwner();
         EngineContracts.LessonInput engineInput = toEngine(input);
         String snapshot = json(engineInput);
         String hash = sha256(snapshot.getBytes(StandardCharsets.UTF_8));
@@ -86,6 +95,7 @@ public class LessonJobService {
         if (existing.isPresent()) {
             return accepted(existing.get());
         }
+        admission.requireNew(com.zone.lesoongen.platform.CapabilityAdmissionPolicy.Capability.F2);
         String id = Ulids.next(clock);
         LessonJob job = new LessonJob(id, JobMode.GENERATE, clean(input.subject()),
                 clean(input.grade()), clean(input.topic()), value(input.durationMinutes(), 45),
@@ -96,10 +106,11 @@ public class LessonJobService {
         return accepted(job);
     }
 
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public LessonResponses.JobAccepted createOptimize(LessonRequests.Optimize input,
             MultipartFile document, String idempotencyKey) {
         validateIdempotencyKey(idempotencyKey);
+        lockSubmissionOwner();
         validateDocument(document);
         String fileHash = digest(document);
         EngineContracts.LessonInput engineInput = toEngine(input);
@@ -109,6 +120,7 @@ public class LessonJobService {
         if (existing.isPresent()) {
             return accepted(existing.get());
         }
+        admission.requireNew(com.zone.lesoongen.platform.CapabilityAdmissionPolicy.Capability.F2);
         String id = Ulids.next(clock);
         LessonJob job = new LessonJob(id, JobMode.OPTIMIZE, clean(input.subject()),
                 clean(input.grade()), clean(input.topic()), value(input.durationMinutes(), 45),
@@ -132,6 +144,20 @@ public class LessonJobService {
         }
         events.record(job, "job.queued", "优化任务已进入队列", null);
         return accepted(job);
+    }
+
+    /** Serialize first submissions before checking their owner-scoped unique key. */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public String lockSubmissionOwner() {
+        String owner = currentUser.require().id();
+        db.queryForObject("SELECT id FROM platform_user WHERE id = ? FOR UPDATE", String.class, owner);
+        return owner;
+    }
+
+    @Transactional(propagation = Propagation.MANDATORY)
+    public LessonResponses.JobAccepted replayAfterSubmissionLock(String jobId) {
+        return accepted(jobs.lockOwnedJob(jobId, currentUser.require().id())
+                .orElseThrow(() -> AppException.notFound("任务")));
     }
 
     @Transactional(readOnly = true)
@@ -236,7 +262,7 @@ public class LessonJobService {
                 list(input.availableResources()), text(input.additionalRequirements()),
                 value(input.lessonStyle(), "choose_the_best_fit_for_this_topic"),
                 value(input.detailLevel(), "showcase"), list(input.optimizationFocus()),
-                list(input.mustPreserveContent()));
+                list(input.mustPreserveContent()), input.optimizationScope());
     }
 
     private void validateDocument(MultipartFile file) {

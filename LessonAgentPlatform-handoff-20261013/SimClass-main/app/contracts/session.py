@@ -82,8 +82,8 @@ class SessionLimits(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     max_events: int = Field(default=60, alias="maxEvents", ge=1, le=1000)
-    max_wall_clock_seconds: int = Field(
-        default=900, alias="maxWallClockSeconds", ge=1, le=86400
+    max_wall_clock_seconds: int | None = Field(
+        default=None, alias="maxWallClockSeconds", ge=1, le=86400
     )
     max_consecutive_timeouts: int = Field(
         default=3, alias="maxConsecutiveTimeouts", ge=1, le=100
@@ -103,8 +103,8 @@ class CreateSessionRequest(BaseModel):
         default=3, alias="maxConsecutiveTimeouts", ge=1, le=100
     )
     max_events: int = Field(default=60, alias="maxEvents", ge=1, le=1000)
-    max_wall_clock_seconds: int = Field(
-        default=900, alias="maxWallClockSeconds", ge=1, le=86400
+    max_wall_clock_seconds: int | None = Field(
+        default=None, alias="maxWallClockSeconds", ge=1, le=86400
     )
     request_key: str = Field(alias="requestKey", min_length=1, max_length=200)
     source: dict[str, Any] | None = None

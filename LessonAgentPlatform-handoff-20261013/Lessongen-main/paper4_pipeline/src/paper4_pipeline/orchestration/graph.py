@@ -316,6 +316,7 @@ class Paper4Workflow(DesignBootstrapNodes, ReviewNodes, RevisionNodes, Finalizat
             run_id=state["run_id"],
             task_id=self._task(state).task_id,
             task_mode=self._task(state).mode,
+            optimization_scope=self._task(state).optimization_scope,
             experiment_id=self._config(state).experiment_id,
             method_id=self._config(state).method_id,
             status=RunStatus(state.get("status", RunStatus.FAILED.value)),

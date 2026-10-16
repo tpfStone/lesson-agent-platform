@@ -407,6 +407,8 @@ class ReviewNodes:
         output = self.agents.validator.validate(
             task, current, batch, batch.round_index, knowledge
         )
+        from paper4_pipeline.control.lifecycle import enforce_task_evidence_constraints
+        output.value.decisions = enforce_task_evidence_constraints(batch, output.value.decisions, task)
         validated = apply_validation(batch, output.value)
         history = merge_critique_history(self._critique_history(state), validated)
         usage = self._sum_usage(self._usage(state), output.usage)

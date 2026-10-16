@@ -31,7 +31,11 @@ public final class EngineContracts {
             @JsonProperty("lesson_style") String lessonStyle,
             @JsonProperty("detail_level") String detailLevel,
             @JsonProperty("optimization_focus") List<String> optimizationFocus,
-            @JsonProperty("must_preserve_content") List<String> mustPreserveContent) {
+            @JsonProperty("must_preserve_content") List<String> mustPreserveContent,
+            @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL) @JsonProperty("optimization_scope") com.zone.lesoongen.api.dto.OptimizationScope optimizationScope) {
+        public LessonInput(String mode, String subject, String grade, String topic, int durationMinutes, String courseInformation, String textbookVersion, String textbookContent, List<String> curriculumStandards, List<String> learningObjectives, String studentProfile, Integer classSize, List<String> availableResources, String additionalRequirements, String lessonStyle, String detailLevel, List<String> optimizationFocus, List<String> mustPreserveContent) {
+            this(mode, subject, grade, topic, durationMinutes, courseInformation, textbookVersion, textbookContent, curriculumStandards, learningObjectives, studentProfile, classSize, availableResources, additionalRequirements, lessonStyle, detailLevel, optimizationFocus, mustPreserveContent, null);
+        }
     }
 
     public record CreateRequest(

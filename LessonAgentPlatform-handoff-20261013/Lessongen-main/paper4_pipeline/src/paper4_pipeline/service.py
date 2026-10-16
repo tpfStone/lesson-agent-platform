@@ -22,6 +22,9 @@ class PipelineService:
         run_id: str | None = None,
         include_docx: bool | None = None,
     ) -> PipelineResult:
+        # Revalidate copies passed by adapters before constructing any provider;
+        # also detach the persisted baseline from mutable caller-owned objects.
+        task = LessonTask.model_validate(task.model_dump(mode="python", warnings=False))
         agents = build_live_suite(config)
         workflow = Paper4Workflow(agents, self.output_root)
         result = workflow.run(task, config, run_id=run_id)

@@ -9,6 +9,9 @@ import {
   type WritebackResult,
 } from "../features/navigation/bridge";
 import { useWorkflowStore } from "../stores/workflow";
+import VersionDocumentPreview from "./VersionDocumentPreview.vue";
+import LessonDocumentPreview from "./LessonDocumentPreview.vue";
+import { navigationPreview } from "../utils/projectedLesson";
 
 const props = defineProps<{ state: NavigationState; disabled?: boolean }>();
 const workflow = useWorkflowStore();
@@ -25,6 +28,9 @@ onBeforeUnmount(() => {
   loadSequence++;
 });
 const linked = computed(() => Boolean(binding.value?.lessonId));
+const revisedPreview = computed(() =>
+  navigationPreview(props.state.lesson_plan),
+);
 const unchanged = computed(
   () =>
     linked.value &&
@@ -154,11 +160,19 @@ async function save() {
       <div class="compare-grid">
         <div>
           <h3>当前正式版本 V{{ binding?.currentVersionNumber }}</h3>
-          <pre>{{ binding?.currentContent }}</pre>
+          <VersionDocumentPreview
+            v-if="binding?.lessonId && binding.currentVersionId"
+            :lesson-id="binding.lessonId"
+            :version-id="binding.currentVersionId"
+            :content="binding.currentContent || ''"
+          />
         </div>
         <div>
           <h3>本次共析修订</h3>
-          <pre>{{ state.lesson_plan.current_content }}</pre>
+          <LessonDocumentPreview
+            :document="revisedPreview.document"
+            :warnings="revisedPreview.warnings"
+          />
         </div>
       </div>
     </details>
@@ -265,7 +279,7 @@ button:disabled {
   font-size: 13px;
   color: var(--color-text);
 }
-pre {
+.compare-grid :deep(.lesson-document) {
   max-height: 280px;
   margin: 0;
   overflow: auto;

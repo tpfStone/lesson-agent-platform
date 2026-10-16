@@ -9,6 +9,7 @@ export interface LessonDocument {
     items?: string[];
     tableRows?: string[][];
     rowIds?: string[];
+    teachingProcess?: { rows: { sourceRowIndex: number }[] };
   }>;
 }
 export interface VersionDocument {

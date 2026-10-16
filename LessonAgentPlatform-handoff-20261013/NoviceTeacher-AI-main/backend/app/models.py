@@ -75,6 +75,10 @@ class LessonPlanVersion(Owned, Record, Base):
     lesson_plan_id: Mapped[str] = mapped_column(ForeignKey('lesson_plans.id'))
     round_number: Mapped[int] = mapped_column(Integer)
     content: Mapped[str] = mapped_column(Text)
+    structured_content: Mapped[dict | None] = mapped_column(json_type)
+    content_format: Mapped[str | None] = mapped_column(String(40))
+    format_provenance: Mapped[str | None] = mapped_column(String(40))
+    structure_warnings: Mapped[list | None] = mapped_column(json_type)
 
 
 class Round(Owned, Record, Base):

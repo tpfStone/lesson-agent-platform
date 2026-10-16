@@ -1,4 +1,5 @@
 import { csrfHeaders } from "../../api/csrf";
+import type { LessonDocument } from "../../types/lesson-document";
 export const navigationBase = "/api/platform/f4";
 
 export class NavigationError extends Error {
@@ -101,6 +102,7 @@ export interface Suggestion {
   decision: { id: string; decision: "ACCEPT" | "REJECT" } | null;
 }
 export interface Section {
+  source_ref?: { blockId: string; rowId?: string; sourceRowIndex?: number };
   id: string;
   order_index: number;
   title: string;
@@ -113,8 +115,23 @@ export interface NavigationState {
   session: SessionSummary;
   round: { id: string; round_number: number };
   sections: Section[];
-  lesson_plan: { current_content: string };
-  lesson_plan_versions: { id: string; round_number: number; content: string }[];
+  lesson_plan: {
+    current_content: string;
+    structured_content?: LessonDocument | null;
+    structure_warnings?: string[] | null;
+    content_format?: string | null;
+  };
+  lesson_plan_versions: {
+    id: string;
+    round_number: number;
+    content: string;
+    structured_content?: LessonDocument | null;
+    structure_warnings?: string[] | null;
+    content_format?: string | null;
+    format_provenance?: string | null;
+    content_sha256?: string;
+    structure_sha256?: string | null;
+  }[];
   revision_candidate?: {
     suggestion_id: string;
     reason: string;

@@ -24,12 +24,38 @@ public final class F2LessonDocumentMapper {
                             text(step.path("student_actions")), text(step.path("assessment")), String.join("\n", extra)));
                 }
                 blocks.add(LessonDocumentSupport.tableBlock(id(), rows));
+            } else if ("template_extensions".equals(key) && value.isObject()) {
+                for (var extension : value.properties()) {
+                    if ("source_table_columns".equals(extension.getKey()) && sourceColumns(blocks, extension.getValue())) continue;
+                    blocks.add(new LessonDocument.Block(id(), "heading", 2, label(extension.getKey()), null, List.of(), List.of(), null));
+                    blocks.add(new LessonDocument.Block(id(), "paragraph", null, text(extension.getValue()), null, List.of(), List.of(), null));
+                }
             } else {
                 blocks.add(new LessonDocument.Block(id(), "heading", 2, label(key), null, List.of(), List.of(), null));
                 blocks.add(new LessonDocument.Block(id(), "paragraph", null, text(value), null, List.of(), List.of(), null));
             }
         }
         return new LessonDocument("1.1", blocks);
+    }
+    private static boolean sourceColumns(List<LessonDocument.Block> blocks, JsonNode columns) {
+        if (!columns.isArray()) return false;
+        for (var column : columns) {
+            if (!column.path("heading").isTextual() || !column.path("rows").isArray()) return false;
+            for (var row : column.path("rows"))
+                if (!row.path("stage").isTextual() || !row.path("text").isTextual()) return false;
+        }
+        for (var column : columns) {
+            String heading = column.path("heading").asText();
+            blocks.add(new LessonDocument.Block(id(), "heading", 2, "原稿补充列：" + heading, null, List.of(), List.of(), null));
+            List<List<String>> rows = new ArrayList<>();
+            rows.add(List.of("教学环节", heading));
+            for (var row : column.path("rows")) rows.add(List.of(row.path("stage").asText(), row.path("text").asText()));
+            // These are source notes, not additional classroom teaching steps.
+            List<String> rowIds = rows.stream().map(row -> "r-" + UUID.randomUUID()).toList();
+            blocks.add(new LessonDocument.Block(id(), "table", null, null, null, List.of(), rows, null,
+                    rowIds, java.util.Map.of()));
+        }
+        return true;
     }
     private static String id() { return "b-" + UUID.randomUUID(); }
     private static String text(JsonNode value) {

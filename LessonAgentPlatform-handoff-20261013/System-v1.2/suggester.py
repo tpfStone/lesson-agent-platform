@@ -14,6 +14,7 @@ from typing import Dict, List
 from knowledge_base import load_knowledge_base, search_knowledge_base
 from standards import search_standards
 from anchors import build_advice_anchor_block
+from usage_meter import metered_operation
 
 
 # ============================================================
@@ -305,6 +306,7 @@ def _match_sources(
 # 批量生成建议
 # ============================================================
 
+@metered_operation('suggestions')
 def generate_suggestions(
     result: Dict,
     plan_text: str,

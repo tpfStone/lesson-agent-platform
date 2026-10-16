@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import math
 import os
 import tempfile
 from pathlib import Path
@@ -49,20 +51,26 @@ def export_docx(
             "Word export requires python-docx; install the optional 'docx' extra."
         ) from exc
 
+    def set_family(r_pr, family: str) -> None:
+        r_fonts = r_pr.find(qn("w:rFonts"))
+        if r_fonts is None:
+            r_fonts = OxmlElement("w:rFonts")
+            r_pr.insert(0, r_fonts)
+        for attribute in list(r_fonts.attrib):
+            if attribute.lower().endswith("theme"):
+                del r_fonts.attrib[attribute]
+        for script in ("ascii", "hAnsi", "eastAsia", "cs"):
+            r_fonts.set(qn("w:" + script), family)
+
     def set_font(
         run,
         *,
         size: float = 10.5,
         bold: bool | None = None,
         color: str = BLACK,
-        chinese: str = "仿宋",
-        latin: str = "Times New Roman",
+        chinese: str = "SimSun",
     ) -> None:
-        run.font.name = latin
-        r_fonts = run._element.get_or_add_rPr().rFonts
-        r_fonts.set(qn("w:ascii"), latin)
-        r_fonts.set(qn("w:hAnsi"), latin)
-        r_fonts.set(qn("w:eastAsia"), chinese)
+        set_family(run._element.get_or_add_rPr(), chinese)
         run.font.size = Pt(size)
         if bold is not None:
             run.bold = bold
@@ -109,10 +117,6 @@ def export_docx(
         tbl_header = OxmlElement("w:tblHeader")
         tbl_header.set(qn("w:val"), "true")
         tr_pr.append(tbl_header)
-
-    def prevent_split(row) -> None:
-        tr_pr = row._tr.get_or_add_trPr()
-        tr_pr.append(OxmlElement("w:cantSplit"))
 
     def configure_table(table, widths: list[int]) -> None:
         table.alignment = WD_TABLE_ALIGNMENT.CENTER
@@ -163,12 +167,12 @@ def export_docx(
         bold: bool = False,
         size: float = 9.5,
         align=None,
-        chinese: str = "仿宋",
+        chinese: str = "SimSun",
     ) -> None:
         paragraph = paragraph_in(cell, align=align)
         if label:
             label_run = paragraph.add_run(label)
-            set_font(label_run, size=size, bold=True, chinese="黑体")
+            set_font(label_run, size=size, bold=True)
         run = paragraph.add_run(text or "—")
         set_font(run, size=size, bold=bold, chinese=chinese)
 
@@ -176,39 +180,30 @@ def export_docx(
         if not values:
             return
         heading = paragraph_in(cell)
-        set_font(heading.add_run(label), size=size, bold=True, chinese="黑体")
+        set_font(heading.add_run(label), size=size, bold=True)
         for value in values:
             p = paragraph_in(cell)
             p.paragraph_format.left_indent = Pt(8)
             p.paragraph_format.first_line_indent = Pt(-8)
             set_font(p.add_run(f"• {value}"), size=size)
 
+    section_number = 0
+
     def add_section_bar(title: str) -> None:
-        paragraph = doc.add_paragraph()
-        paragraph.paragraph_format.space_before = Pt(4)
-        paragraph.paragraph_format.space_after = Pt(0)
+        nonlocal section_number
+        section_number += 1
+        paragraph = doc.add_paragraph(style="Heading 1")
+        paragraph.paragraph_format.space_before = Pt(8)
+        paragraph.paragraph_format.space_after = Pt(4)
         paragraph.paragraph_format.left_indent = Pt(0)
         paragraph.paragraph_format.right_indent = Pt(0)
         paragraph.paragraph_format.keep_with_next = True
         paragraph.paragraph_format.keep_together = True
-        p_pr = paragraph._p.get_or_add_pPr()
-        shading = OxmlElement("w:shd")
-        shading.set(qn("w:fill"), MID_GRAY)
-        p_pr.append(shading)
-        borders = OxmlElement("w:pBdr")
-        for edge in ("top", "left", "bottom", "right"):
-            border = OxmlElement(f"w:{edge}")
-            border.set(qn("w:val"), "single")
-            border.set(qn("w:sz"), "4")
-            border.set(qn("w:space"), "0")
-            border.set(qn("w:color"), "000000")
-            borders.append(border)
-        p_pr.append(borders)
         set_font(
-            paragraph.add_run("  " + title),
+            paragraph.add_run(f"{_cn_number(section_number)}、{title}"),
             size=11,
             bold=True,
-            chinese="黑体",
+            chinese="SimHei",
         )
 
     def add_body(text: str) -> None:
@@ -241,13 +236,33 @@ def export_docx(
     section.footer_distance = Inches(0.3)
 
     normal = doc.styles["Normal"]
-    normal.font.name = "Times New Roman"
-    normal._element.get_or_add_rPr().rFonts.set(qn("w:eastAsia"), "仿宋")
+    set_family(normal._element.get_or_add_rPr(), "SimSun")
     normal.font.size = Pt(10.5)
     normal.font.color.rgb = RGBColor.from_string(BLACK)
     normal.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.LEFT
     normal.paragraph_format.space_after = Pt(3)
     normal.paragraph_format.line_spacing = 1.2
+
+    defaults = doc.styles.element.find(qn("w:docDefaults"))
+    if defaults is None:
+        defaults = OxmlElement("w:docDefaults")
+        doc.styles.element.insert(0, defaults)
+    r_default = defaults.find(qn("w:rPrDefault"))
+    if r_default is None:
+        r_default = OxmlElement("w:rPrDefault")
+        defaults.append(r_default)
+    r_pr = r_default.find(qn("w:rPr"))
+    if r_pr is None:
+        r_pr = OxmlElement("w:rPr")
+        r_default.append(r_pr)
+    set_family(r_pr, "SimSun")
+    for name in ("Title", *(f"Heading {index}" for index in range(1, 10))):
+        style = doc.styles[name]
+        set_family(style.element.get_or_add_rPr(), "SimHei")
+        style.font.color.rgb = RGBColor.from_string(BLACK)
+        border = style.element.find("w:pPr/w:pBdr", style.element.nsmap)
+        if border is not None:
+            border.getparent().remove(border)
 
     doc.core_properties.title = f"{document.metadata.topic}教学设计"
     doc.core_properties.subject = "结构化教学设计"
@@ -262,7 +277,7 @@ def export_docx(
         ),
         size=8,
         color=DARK_GRAY,
-        chinese="宋体",
+        chinese="SimSun",
     )
     footer = section.footer.paragraphs[0]
     footer.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -271,7 +286,7 @@ def export_docx(
     field.set(qn("w:instr"), "PAGE")
     footer._p.append(field)
 
-    title = doc.add_paragraph()
+    title = doc.add_paragraph(style="Title")
     title.alignment = WD_ALIGN_PARAGRAPH.CENTER
     title.paragraph_format.space_after = Pt(10)
     title.paragraph_format.keep_with_next = True
@@ -279,7 +294,7 @@ def export_docx(
         title.add_run(f"{document.metadata.topic}教学设计"),
         size=18,
         bold=True,
-        chinese="黑体",
+        chinese="SimHei",
     )
 
     metadata = doc.add_table(rows=2, cols=4)
@@ -300,7 +315,7 @@ def export_docx(
             bold=True,
             size=9.5,
             align=WD_ALIGN_PARAGRAPH.CENTER,
-            chinese="黑体",
+            chinese="SimSun",
         )
         clear_cell(metadata.cell(1, index))
         add_cell_text(
@@ -310,39 +325,39 @@ def export_docx(
             align=WD_ALIGN_PARAGRAPH.CENTER,
         )
 
+    if not document.curriculum_standards:
+        add_body("未提供课程标准原文，使用前须由教师核验。")
     sections: list[tuple[str, str | list[str]]] = [
-        (
-            "一、课程标准依据",
-            document.curriculum_standards
-            or ["用户未提供可核验的课程标准原文，待教师补充。"],
-        ),
-        ("二、教学内容分析", document.content_analysis or "待教师依据教材补充核验。"),
-        ("三、学情分析", document.student_analysis or "待教师结合班级实际补充。"),
+        ("课程标准依据", document.curriculum_standards),
+        ("教学内容分析", document.content_analysis),
+        ("学情分析", document.student_analysis),
     ]
     for heading, value in sections:
+        if not value:
+            continue
         add_section_bar(heading)
         add_bullets(value) if isinstance(value, list) else add_body(value)
 
-    add_section_bar("四、教学设计主线")
-    add_body("设计主张：" + (document.design_thesis or "待补充"))
-    add_body("驱动问题：" + (document.driving_question or "待补充"))
-    add_body(
-        "学习轨迹："
-        + (" → ".join(document.learning_trajectory) or "待补充")
-    )
+    if document.design_thesis or document.driving_question or document.learning_trajectory:
+        add_section_bar("教学设计主线")
+        if document.design_thesis:
+            add_body("设计主张：" + document.design_thesis)
+        if document.driving_question:
+            add_body("驱动问题：" + document.driving_question)
+        if document.learning_trajectory:
+            add_body("学习轨迹：" + " → ".join(document.learning_trajectory))
 
     if document.learning_objectives:
-        add_section_bar("五、学习目标与达成证据")
+        add_section_bar("学习目标与达成证据")
         table = doc.add_table(rows=1, cols=3)
         configure_table(table, [1000, 4100, 4400])
         for idx, label in enumerate(["编号", "学习目标", "达成证据"]):
             clear_cell(table.cell(0, idx))
             set_cell_shading(table.cell(0, idx), LIGHT_GRAY)
-            add_cell_text(table.cell(0, idx), label, bold=True, chinese="黑体")
+            add_cell_text(table.cell(0, idx), label, bold=True)
         set_repeat_header(table.rows[0])
         for objective in document.learning_objectives:
             row = table.add_row()
-            prevent_split(row)
             for idx, width in enumerate([1000, 4100, 4400]):
                 set_cell_width(row.cells[idx], width)
                 set_cell_margins(row.cells[idx])
@@ -351,7 +366,8 @@ def export_docx(
             add_cell_text(row.cells[1], objective.description)
             add_cell_text(row.cells[2], objective.evidence_of_achievement or "待补充")
 
-    add_section_bar("六、教学重点、难点与策略")
+    if document.key_points or document.difficult_points or document.teaching_strategy:
+        add_section_bar("教学重点、难点与策略")
     if document.key_points:
         add_body("教学重点：" + "；".join(document.key_points))
     if document.difficult_points:
@@ -359,16 +375,14 @@ def export_docx(
     if document.teaching_strategy:
         add_body("教学策略：" + document.teaching_strategy)
 
-    add_section_bar("七、教学准备")
     if document.resources:
+        add_section_bar("教学准备")
         for resource in document.resources:
-            add_body(f"{resource.name}：{resource.description}")
+            add_body(resource.name + (f"：{resource.description}" if resource.description else ""))
             if resource.ready_to_use_content:
                 add_body("材料内容：" + resource.ready_to_use_content)
-    else:
-        add_body("待教师根据课堂条件补充并核验。")
 
-    add_section_bar("八、教学过程")
+    add_section_bar("教学过程")
     resource_names = {item.resource_id: item.name for item in document.resources}
     artifact_titles = {
         item.artifact_id: item.title for item in document.teaching_artifacts
@@ -383,7 +397,7 @@ def export_docx(
         set_cell_shading(process.cell(0, idx), LIGHT_GRAY)
         add_cell_text(
             process.cell(0, idx), label, bold=True, size=9.5,
-            align=WD_ALIGN_PARAGRAPH.CENTER, chinese="黑体"
+            align=WD_ALIGN_PARAGRAPH.CENTER
         )
     set_repeat_header(process.rows[0])
 
@@ -397,7 +411,7 @@ def export_docx(
 
         add_cell_text(
             row.cells[0], f"{index}. {step.stage}（{step.duration_minutes}分钟）",
-            bold=True, chinese="黑体"
+            bold=True
         )
         add_cell_list(row.cells[0], "教师活动", step.teacher_actions)
         for q_index, question in enumerate(step.questions, start=1):
@@ -445,13 +459,13 @@ def export_docx(
             add_cell_text(row.cells[2], step.design_rationale, label="设计意图：")
 
     if document.teaching_artifacts:
-        add_section_bar("九、可直接使用的教学材料")
+        add_section_bar("可直接使用的教学材料")
         for index, artifact in enumerate(document.teaching_artifacts, start=1):
             p = doc.add_paragraph()
             p.paragraph_format.keep_with_next = True
             set_font(
                 p.add_run(f"材料 {index}｜{artifact.title}（{artifact.artifact_type}）"),
-                size=11, bold=True, chinese="黑体"
+                size=11, bold=True, chinese="SimHei"
             )
             material = doc.add_table(rows=0, cols=2)
             configure_table(material, [1550, 7950])
@@ -463,16 +477,14 @@ def export_docx(
                 if not value:
                     continue
                 row = material.add_row()
-                prevent_split(row)
                 for idx, width in enumerate([1550, 7950]):
                     set_cell_width(row.cells[idx], width)
                     set_cell_margins(row.cells[idx])
                     clear_cell(row.cells[idx])
                 set_cell_shading(row.cells[0], LIGHT_GRAY)
-                add_cell_text(row.cells[0], label, bold=True, chinese="黑体")
+                add_cell_text(row.cells[0], label, bold=True)
                 add_cell_text(row.cells[1], value)
 
-    next_number = 10
     for title_text, value in (
         ("总体评价设计", document.assessment_plan),
         ("差异化支持", document.differentiation),
@@ -481,20 +493,45 @@ def export_docx(
         ("课后观察与反思", document.reflection),
     ):
         if value.strip():
-            add_section_bar(f"{_cn_number(next_number)}、{title_text}")
+            add_section_bar(title_text)
             add_body(value)
-            next_number += 1
     if document.references:
-        add_section_bar(f"{_cn_number(next_number)}、参考材料")
+        add_section_bar("参考材料")
         add_bullets(document.references)
-        next_number += 1
 
-    add_section_bar(f"{_cn_number(next_number)}、教师核验与实施记录")
+    if document.template_extensions:
+        add_section_bar("补充内容")
+        for key, value in document.template_extensions.items():
+            if key == "source_table_columns" and isinstance(value, list):
+                for column in value:
+                    add_body(f"原稿补充列：{column['heading']}（{column['table_locator']}，第 {column['column_index'] + 1} 列）")
+                    notes = doc.add_table(rows=1, cols=2)
+                    configure_table(notes, [2700, 6800])
+                    for index, label in enumerate(["教学环节", column["heading"]]):
+                        add_cell_text(notes.cell(0, index), label, bold=True)
+                        set_cell_shading(notes.cell(0, index), LIGHT_GRAY)
+                    set_repeat_header(notes.rows[0])
+                    for source_row in column["rows"]:
+                        row = notes.add_row()
+                        add_cell_text(row.cells[0], source_row["stage"])
+                        add_cell_text(row.cells[1], source_row["text"])
+                continue
+            add_body({"extra_notes": "额外备注"}.get(key, key) + "：")
+            if isinstance(value, str):
+                add_body(value)
+            elif isinstance(value, list) and value and all(isinstance(item, str) for item in value):
+                add_bullets(value)
+            else:
+                # Unknown extension schemas remain visible without flattening
+                # away their keys, ordering, or false/zero/null values.
+                add_body(json.dumps(value, ensure_ascii=False, indent=2, allow_nan=False))
+
+    add_section_bar("教师核验与实施记录")
     review = doc.add_table(rows=0, cols=2)
     configure_table(review, [2700, 6800])
     for label, value in (
         ("使用前核验", "□ 课标与教材原文  □ 例题/语料与答案  □ 时间与资源  □ 安全、伦理与隐私"),
-        ("实施证据", "记录学生关键回答、作品差异、误概念以及教师临场调整：\n\n"),
+        ("实施证据", "记录学生关键回答、作品差异、误概念以及教师临场调整。"),
         ("下次修订", "保留：　　　　　　　　　调整：　　　　　　　　　删除/新增："),
     ):
         row = review.add_row()
@@ -503,7 +540,7 @@ def export_docx(
             set_cell_margins(row.cells[idx], vertical=100)
             clear_cell(row.cells[idx])
         set_cell_shading(row.cells[0], LIGHT_GRAY)
-        add_cell_text(row.cells[0], label, bold=True, chinese="黑体")
+        add_cell_text(row.cells[0], label, bold=True)
         add_cell_text(row.cells[1], value)
 
     p = doc.add_paragraph()
@@ -514,8 +551,21 @@ def export_docx(
             f"生成记录：run={run_id}；best={best_version_id}；last={last_version_id}。"
             "本教案为 AI 生成草案，课程标准、教材内容与答案须由教师核验。"
         ),
-        size=8, color=DARK_GRAY, chinese="宋体"
+        size=8, color=DARK_GRAY, chinese="SimSun"
     )
+
+    # Keep compact rows readable across page boundaries. Long cells must remain
+    # splittable; a blanket cantSplit makes a page-sized row overflow or leave gaps.
+    for table in doc.tables:
+        for row in table.rows:
+            estimated_lines = []
+            for cell in row.cells:
+                width = int(cell._tc.get_or_add_tcPr().find(qn("w:tcW")).get(qn("w:w")))
+                characters_per_line = max(1, width / 20 / 9.5 - 2)
+                estimated_lines.append(sum(max(1, math.ceil(len(line) / characters_per_line))
+                                           for line in cell.text.split("\n")))
+            if max(estimated_lines, default=0) <= 14:
+                row._tr.get_or_add_trPr().append(OxmlElement("w:cantSplit"))
 
     path.parent.mkdir(parents=True, exist_ok=True)
     descriptor, temporary = tempfile.mkstemp(

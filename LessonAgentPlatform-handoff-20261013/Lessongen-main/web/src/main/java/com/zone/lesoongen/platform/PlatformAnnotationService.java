@@ -43,6 +43,7 @@ public class PlatformAnnotationService {
     private final ObjectMapper mapper;
     private final PlatformLessonDocumentService documents;
     private final com.zone.lesoongen.auth.PlatformAccessService access;
+    private final CapabilityAdmissionPolicy admission;
     private final org.springframework.transaction.support.TransactionTemplate transactions;
     @Value("${app.scheduling-enabled:true}") private boolean schedulingEnabled;
 
@@ -50,13 +51,15 @@ public class PlatformAnnotationService {
             PlatformIssueIngestService issueIngest, ObjectMapper mapper,
             PlatformLessonDocumentService documents, org.springframework.transaction.PlatformTransactionManager transactionManager,
             com.zone.lesoongen.auth.PlatformAccessService access,
-            @Value("${app.f1-base-url:http://127.0.0.1:8002}") String f1BaseUrl) {
+            @Value("${app.f1-base-url:http://127.0.0.1:8002}") String f1BaseUrl,
+            CapabilityAdmissionPolicy admission) {
         this.db = db;
         this.lessons = lessons;
         this.issueIngest = issueIngest;
         this.mapper = mapper;
         this.documents = documents;
         this.access = access;
+        this.admission = admission;
         this.transactions = new org.springframework.transaction.support.TransactionTemplate(transactionManager);
         // Match F2's working Python-engine transport. Avoid an h2c upgrade,
         // which can cause Uvicorn/httptools to discard the request body.
@@ -76,6 +79,7 @@ public class PlatformAnnotationService {
     }
 
     public AnnotationRun create(String lessonId, String versionId, boolean suggest, String requestKey) {
+        access.requireOwnedLesson(lessonId);
         var detail = lessons.detail(lessonId);
         var version = detail.versions().stream().filter(v -> v.id().equals(versionId)).findFirst()
                 .orElseThrow(() -> AppException.notFound("教案版本"));
@@ -103,6 +107,7 @@ public class PlatformAnnotationService {
                     if (!fingerprint.equals(raced.get(0).get("request_fingerprint"))) throw new AppException(HttpStatus.CONFLICT, "F1_REQUEST_REUSED", "提交编号冲突");
                     return (String) raced.get(0).get("id");
                 }
+                admission.requireNew(CapabilityAdmissionPolicy.Capability.F1);
                 String createdId = Ulids.next(java.time.Clock.systemUTC());
                 Timestamp now = Timestamp.from(Instant.now());
                 db.update("INSERT INTO platform_annotation_submission (id, operation_key, lesson_id, version_id, request_fingerprint, request_json, state, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 'PENDING', ?, ?)",
@@ -179,6 +184,7 @@ public class PlatformAnnotationService {
         LinkedHashSet<String> seen = new LinkedHashSet<>();
         List<Map<String, Object>> items = new ArrayList<>();
         for (BatchItemRef ref : refs) {
+            access.requireOwnedLesson(ref.lessonId());
             String key = ref.lessonId() + "\u0000" + ref.versionId();
             if (!seen.add(key)) {
                 throw new AppException(HttpStatus.BAD_REQUEST, "F1_BATCH_DUPLICATE",
@@ -223,6 +229,7 @@ public class PlatformAnnotationService {
                             "F1_BATCH_REQUEST_REUSED", "批次编号冲突");
                     return;
                 }
+                admission.requireNew(CapabilityAdmissionPolicy.Capability.F1);
                 Timestamp now = Timestamp.from(Instant.now());
                 db.update("INSERT INTO platform_annotation_batch_submission (id, operation_key, owner_user_id, request_fingerprint, request_json, state, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'PENDING', ?, ?)",
                         id, key, owner, fingerprint, serialized, now, now);
@@ -289,11 +296,13 @@ public class PlatformAnnotationService {
         List<String> nativeRunIds = new ArrayList<>();
         List<String> platformIds = new ArrayList<>();
         for (String id : unique) {
+            access.requireOwnedAnnotation(id);
             AnnotationRun run = findById(id);
             nativeRunIds.add(run.nativeRunId());
             platformIds.add(run.id());
         }
 
+        admission.requireNew(CapabilityAdmissionPolicy.Capability.F1);
         byte[] payload = serialize(Map.of("run_ids", nativeRunIds), "F1_COMPARISON_REQUEST_SERIALIZATION",
                 "无法生成 F1 横向对比请求");
         Map<?, ?> accepted = request(() -> f1.post().uri("/internal/v1/comparisons")

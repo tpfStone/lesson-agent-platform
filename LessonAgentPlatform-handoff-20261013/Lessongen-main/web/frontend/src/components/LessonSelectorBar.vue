@@ -3,7 +3,9 @@ import { computed, onMounted, ref, watch } from "vue";
 import axios from "axios";
 import { RouterLink } from "vue-router";
 import LessonImportPanel from "./LessonImportPanel.vue";
-import ReviewDocumentPreview from "./ReviewDocumentPreview.vue";
+import VersionDocumentPreview from "./VersionDocumentPreview.vue";
+import DocumentDownloadNotice from "./DocumentDownloadNotice.vue";
+import { useDialogFocus } from "../composables/useDialogFocus";
 
 export interface LessonOption {
   id: string;
@@ -24,6 +26,7 @@ const props = withDefaults(
   defineProps<{
     initialLessonId?: string;
     initialVersionId?: string;
+    initialUpload?: boolean;
     showTools?: boolean;
     locked?: boolean;
     actionLabel?: string;
@@ -33,6 +36,7 @@ const props = withDefaults(
   {
     initialLessonId: "",
     initialVersionId: "",
+    initialUpload: false,
     showTools: true,
     locked: false,
     actionLabel: "",
@@ -54,7 +58,15 @@ const loading = ref(true),
 const comparing = ref(false),
   leftId = ref(""),
   rightId = ref("");
-const uploading = ref(false);
+const uploading = ref(props.initialUpload);
+const uploadDialog = ref<HTMLElement | null>(null);
+const compareDialog = ref<HTMLElement | null>(null);
+useDialogFocus(uploading, uploadDialog, () => {
+  uploading.value = false;
+});
+useDialogFocus(comparing, compareDialog, () => {
+  comparing.value = false;
+});
 const selectedLesson = computed(
   () => lessons.value.find((item) => item.id === lessonId.value) || null,
 );
@@ -253,12 +265,18 @@ watch(
         {{ actionBusy ? "正在处理……" : actionLabel }}
       </button>
     </div>
+    <DocumentDownloadNotice
+      v-if="showTools && exportUrl"
+      :lesson-id="lessonId"
+    />
     <p v-if="error" class="selector-error" role="alert">
       暂时无法读取教案，请稍后重试。<small>{{ error }}</small>
     </p>
-    <RouterLink v-if="!loading && !lessons.length" to="/"
-      >返回首页上传或生成教案</RouterLink
-    >
+    <p v-if="!loading && !lessons.length">
+      请点击“上传教案”导入 DOCX，或前往<RouterLink to="/create/generate"
+        >从零生成教案</RouterLink
+      >。
+    </p>
     <Teleport to="body"
       ><div
         v-if="comparing"
@@ -266,6 +284,8 @@ watch(
         @click.self="comparing = false"
       >
         <section
+          ref="compareDialog"
+          tabindex="-1"
           class="compare-dialog"
           role="dialog"
           aria-modal="true"
@@ -292,7 +312,12 @@ watch(
                     {{ versionLabel(version) }}
                   </option>
                 </select></label
-              ><ReviewDocumentPreview v-if="left" :content="left.content" />
+              ><VersionDocumentPreview
+                v-if="left"
+                :lesson-id="lessonId"
+                :version-id="left.id"
+                :content="left.content"
+              />
             </div>
             <div>
               <label
@@ -305,7 +330,12 @@ watch(
                     {{ versionLabel(version) }}
                   </option>
                 </select></label
-              ><ReviewDocumentPreview v-if="right" :content="right.content" />
+              ><VersionDocumentPreview
+                v-if="right"
+                :lesson-id="lessonId"
+                :version-id="right.id"
+                :content="right.content"
+              />
             </div>
           </div>
         </section></div
@@ -317,6 +347,8 @@ watch(
         @click.self="uploading = false"
       >
         <section
+          ref="uploadDialog"
+          tabindex="-1"
           class="upload-dialog"
           role="dialog"
           aria-modal="true"
@@ -477,6 +509,8 @@ watch(
 }
 .upload-dialog {
   width: min(760px, 100%);
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .compare-dialog header,
 .upload-dialog header {

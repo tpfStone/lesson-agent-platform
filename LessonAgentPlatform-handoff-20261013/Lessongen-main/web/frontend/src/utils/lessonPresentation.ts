@@ -46,6 +46,27 @@ const hiddenKeys = new Set([
   "artifact_id",
 ]);
 
+export function formatBaselineWarning(warning: string): string {
+  // Translate only the engine's section-location templates, not arbitrary prose
+  // or the persisted warning/scope evidence.
+  const emptySection = warning.match(
+    /^(原稿已有且位于本次范围外，仅提示：)?任务要求的章节 ([A-Za-z_][A-Za-z0-9_]*) 为空。$/,
+  );
+  if (emptySection) {
+    const [, prefix = "", key] = emptySection;
+    const location = Object.prototype.hasOwnProperty.call(labels, key)
+      ? `“${labels[key]}”`
+      : "（位置暂无法识别，请对照原稿核对）";
+    return `${prefix}任务要求的章节${location}为空。`;
+  }
+  const unknownSection = warning.match(
+    /^(原稿已有且位于本次范围外，仅提示：)?任务要求了未知章节：[^。\r\n]+。$/,
+  );
+  if (unknownSection)
+    return `${unknownSection[1] || ""}任务要求的章节位置暂无法识别，请对照原稿核对。`;
+  return warning;
+}
+
 export function lessonPathLabel(path: string): string {
   if (!path.startsWith("/")) return "教案整体";
   const parts = path

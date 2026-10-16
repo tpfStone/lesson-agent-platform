@@ -25,6 +25,11 @@ data:
 output:
   dir: "./output"
 
+# Platform worker wall-clock limit, including scoring, suggestions and exports.
+# F1_ANNOTATION_HARD_TIMEOUT_SECONDS overrides this; positive seconds only.
+execution:
+  hard_timeout_seconds: 900
+
 # --- 提示词配置 ---
 prompt:
   # 示例数量上限（防止 token 超限）

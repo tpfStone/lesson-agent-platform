@@ -52,8 +52,19 @@ public class PlatformLessonExportController {
 
     @GetMapping("/{lessonId}/versions/{versionId}/export/pdf")
     public ResponseEntity<byte[]> exportPdf(@PathVariable String lessonId, @PathVariable String versionId) throws IOException {
-        var word = exportDocx(lessonId, versionId);
-        byte[] bytes = pdf.convert(word.getBody());
+        var detail = lessons.detail(lessonId);
+        var version = detail.versions().stream().filter(v -> v.id().equals(versionId)).findFirst()
+                .orElseThrow(() -> AppException.notFound("教案版本"));
+        LessonDocument document = null;
+        try {
+            var snapshot = documents.get(lessonId, versionId);
+            if ("VERIFIED".equals(snapshot.bindingStatus())) document = snapshot.document();
+        } catch (AppException missing) {
+            if (!"LESSON_DOCUMENT_NOT_FOUND".equals(missing.code())) throw missing;
+        }
+        boolean degraded = document == null;
+        if (degraded) document = LessonDocumentSupport.fromPlainText(version.content());
+        byte[] bytes = pdf.render(document, detail.lesson().title(), version.versionNumber(), degraded);
         String filename = "lesson-" + versionId + ".pdf";
         return ResponseEntity.ok().contentType(MediaType.APPLICATION_PDF).contentLength(bytes.length)
                 .header(HttpHeaders.CONTENT_DISPOSITION, ContentDisposition.attachment().filename(filename).build().toString()).body(bytes);
@@ -76,7 +87,7 @@ public class PlatformLessonExportController {
         byte[] bytes = null;
         try {
             var snapshot = documents.get(lessonId, versionId);
-            if ("VERIFIED".equals(snapshot.bindingStatus())) bytes = LessonDocumentDocxExporter.export(snapshot.document());
+            if ("VERIFIED".equals(snapshot.bindingStatus())) bytes = LessonDocumentDocxExporter.exportForDownload(snapshot.document());
         } catch (AppException missing) {
             if (!"LESSON_DOCUMENT_NOT_FOUND".equals(missing.code())) throw missing;
         }
@@ -173,6 +184,7 @@ public class PlatformLessonExportController {
 
     private static byte[] fallbackDocx(String title, int versionNumber, String content) throws IOException {
         try (var document = new XWPFDocument(); var output = new ByteArrayOutputStream()) {
+            LessonDocumentFonts.initialize(document);
             addParagraph(document, title, 18, true, true);
             addParagraph(document, "教案版本 V" + versionNumber, 10, false, false);
             appendContent(document, content);
@@ -248,7 +260,7 @@ public class PlatformLessonExportController {
                 XWPFParagraph paragraph = cell.addParagraph();
                 paragraph.setSpacingAfter(80);
                 XWPFRun run = paragraph.createRun();
-                run.setFontFamily("Microsoft YaHei");
+                LessonDocumentFonts.apply(run, false);
                 run.setFontSize(10);
                 run.setBold(row == 0);
                 String[] parts = rows.get(row).get(column).split("\\n", -1);
@@ -269,10 +281,11 @@ public class PlatformLessonExportController {
 
     private static void addParagraph(XWPFDocument document, String text, int size, boolean bold, boolean centered) {
         XWPFParagraph paragraph = document.createParagraph();
+        if (bold) paragraph.setStyle(size >= 18 ? "Title" : size >= 16 ? "Heading1" : "Heading2");
         paragraph.setSpacingAfter(size >= 14 ? 190 : 100);
         if (centered) paragraph.setAlignment(org.apache.poi.xwpf.usermodel.ParagraphAlignment.CENTER);
         XWPFRun run = paragraph.createRun();
-        run.setFontFamily("Microsoft YaHei");
+        LessonDocumentFonts.apply(run, bold);
         run.setFontSize(size);
         run.setBold(bold);
         String[] parts = text.split("\\n", -1);

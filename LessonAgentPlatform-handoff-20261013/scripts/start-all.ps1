@@ -167,7 +167,7 @@ if (-not $SkipFrontend) {
 }
 
 Write-Host 'Waiting for services...'
-$healthArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $PSScriptRoot 'health-check.ps1'), '-Retries', '45', '-DelaySeconds', '2')
+$healthArgs = @('-NoProfile', '-File', (Join-Path $PSScriptRoot 'health-check.ps1'), '-Retries', '45', '-DelaySeconds', '2')
 if ($SkipFrontend) { $healthArgs += '-SkipFrontend' }
 & powershell.exe @healthArgs
 if ($LASTEXITCODE -ne 0) {
@@ -179,7 +179,7 @@ Write-Host 'All requested services are healthy.'
 if (-not $SkipFrontend) { Write-Host 'Open http://127.0.0.1:5177' }
 } catch {
     if ($pids.Count -gt 0) {
-        & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'stop-all.ps1')
+        & powershell.exe -NoProfile -File (Join-Path $PSScriptRoot 'stop-all.ps1')
     }
     throw
 }

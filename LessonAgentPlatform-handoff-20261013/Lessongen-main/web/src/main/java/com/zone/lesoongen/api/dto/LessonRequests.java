@@ -49,6 +49,10 @@ public final class LessonRequests {
             @Pattern(regexp = "standard|showcase") String detailLevel,
             @Size(max = 20) List<@NotBlank @Size(max = 1000) String> optimizationFocus,
             @Size(max = 20) List<@NotBlank @Size(max = 2000) String> mustPreserveContent,
-            @Pattern(regexp = "[0-9A-HJKMNP-TV-Z]{26}") String retryOfJobId) {
+            @Pattern(regexp = "[0-9A-HJKMNP-TV-Z]{26}") String retryOfJobId,
+            @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL) com.zone.lesoongen.api.dto.OptimizationScope optimizationScope) {
+        public Optimize(String subject, String grade, String topic, Integer durationMinutes, String courseInformation, String textbookVersion, String textbookContent, List<String> curriculumStandards, List<String> learningObjectives, String studentProfile, Integer classSize, List<String> availableResources, String additionalRequirements, String lessonStyle, String detailLevel, List<String> optimizationFocus, List<String> mustPreserveContent, String retryOfJobId) {
+            this(subject, grade, topic, durationMinutes, courseInformation, textbookVersion, textbookContent, curriculumStandards, learningObjectives, studentProfile, classSize, availableResources, additionalRequirements, lessonStyle, detailLevel, optimizationFocus, mustPreserveContent, retryOfJobId, null);
+        }
     }
 }

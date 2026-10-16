@@ -5,11 +5,13 @@ import { ApiProblem, createOptimize, makeIdempotencyKey } from "../api/client";
 import { useDraftStore } from "../stores/draft";
 import LessonFields from "../components/LessonFields.vue";
 import ChipInput from "../components/ChipInput.vue";
+import OptimizationScopeFields from "../components/OptimizationScopeFields.vue";
 import FormWayfinder from "../components/FormWayfinder.vue";
 import { sha256Hex } from "../utils/sha256";
 
 const router = useRouter();
 const drafts = useDraftStore();
+drafts.optimize.optimizationScope ??= { mode: "local", editablePaths: [] };
 const file = ref<File | null>(null);
 const fileError = ref("");
 const digest = ref("");
@@ -195,6 +197,13 @@ async function submit() {
   mustPreserveInput.value?.commitPending();
   error.value = "";
   if ((await focusRequired()) || !file.value) return;
+  if (
+    drafts.optimize.optimizationScope?.mode === "local" &&
+    !drafts.optimize.optimizationScope.editablePaths.length
+  ) {
+    error.value = "请至少选择一个可修改栏目。";
+    return;
+  }
   invalidField.value = null;
   submitting.value = true;
   key.value ||= makeIdempotencyKey();
@@ -306,6 +315,7 @@ async function submit() {
           <p>明确最想改好的部分，以及不能被改写掉的内容。</p>
         </div>
       </div>
+      <OptimizationScopeFields v-model="drafts.optimize.optimizationScope!" />
       <div class="field-grid two">
         <label
           ><span>优化重点</span

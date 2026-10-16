@@ -5,6 +5,8 @@ import axios from "axios";
 import AppPageHeader from "../components/AppPageHeader.vue";
 import BaseCard from "../components/BaseCard.vue";
 import ConfirmDialog from "../components/ConfirmDialog.vue";
+import OptimizationScopeFields from "../components/OptimizationScopeFields.vue";
+import type { OptimizationScope } from "../types/api";
 import LessonSelectorBar, {
   type LessonOption,
   type VersionOption,
@@ -37,6 +39,7 @@ interface OptimizeHistory {
   createdAt: string;
 }
 interface OptimizeDraft {
+  optimizationScope?: OptimizationScope;
   subject: string;
   grade: string;
   topic: string;
@@ -127,6 +130,10 @@ const additionalRequirements = ref("");
 const lessonStyle = ref("choose_the_best_fit_for_this_topic");
 const detailLevel = ref("showcase");
 const focusText = ref("");
+const optimizationScope = ref<OptimizationScope>({
+  mode: "local",
+  editablePaths: ["/procedure_steps"],
+});
 const preserveText = ref("");
 const draftSavedAt = ref("");
 const formTouched = ref(false);
@@ -166,6 +173,7 @@ function readDraft(key: string): OptimizeDraft | null {
 function saveDraft() {
   if (hydrating.value || !detail.value || !draftKey()) return;
   const payload: OptimizeDraft = {
+    optimizationScope: optimizationScope.value,
     subject: subject.value,
     grade: grade.value,
     topic: topic.value,
@@ -253,6 +261,10 @@ async function loadDetail(id: string, versionId: string) {
       saved?.lessonStyle ?? "choose_the_best_fit_for_this_topic";
     detailLevel.value = saved?.detailLevel ?? "showcase";
     focusText.value = saved?.focusText ?? "";
+    optimizationScope.value = saved?.optimizationScope ?? {
+      mode: "local",
+      editablePaths: saved ? [] : ["/procedure_steps"],
+    };
     preserveText.value = saved?.preserveText ?? "";
     formTouched.value = false;
     draftSavedAt.value = saved
@@ -395,6 +407,13 @@ async function start() {
     return;
   }
 
+  if (
+    optimizationScope.value.mode === "local" &&
+    !optimizationScope.value.editablePaths.length
+  ) {
+    error.value = "请至少选择一个可修改栏目。";
+    return;
+  }
   busy.value = true;
   error.value = "";
   try {
@@ -420,6 +439,7 @@ async function start() {
           lessonStyle: lessonStyle.value,
           detailLevel: detailLevel.value,
           optimizationFocus: parseLines(focusText.value),
+          optimizationScope: optimizationScope.value,
           mustPreserveContent: parseLines(preserveText.value),
         },
       )
@@ -462,6 +482,7 @@ watch(
     lessonStyle,
     detailLevel,
     focusText,
+    optimizationScope,
     preserveText,
   ],
   saveDraft,
@@ -717,6 +738,7 @@ watch(
               </p>
             </div>
           </header>
+          <OptimizationScopeFields v-model="optimizationScope" />
           <label class="wide-field"
             ><span>你还希望重点优化</span
             ><textarea

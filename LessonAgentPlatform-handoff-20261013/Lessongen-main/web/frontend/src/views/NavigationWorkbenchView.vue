@@ -24,6 +24,8 @@ import ResultDownloadPanel, {
   type DownloadFile,
 } from "../components/ResultDownloadPanel.vue";
 import { request, type NavigationState } from "../features/navigation/api";
+import LessonDocumentPreview from "../components/LessonDocumentPreview.vue";
+import { navigationPreview, sectionDocument } from "../utils/projectedLesson";
 
 const vLoading = ElLoading.directive;
 const route = useRoute();
@@ -67,17 +69,25 @@ const canNext = computed(() =>
   ),
 );
 const path = computed(() => "/sessions/" + state.value?.session.id);
-const finalContent = computed(
-  () =>
-    (selectedVersion.value === null
-      ? state.value?.lesson_plan.current_content
-      : state.value?.lesson_plan_versions.find(
-          (version) => version.round_number === selectedVersion.value,
-        )?.content) || "",
-);
 const currentFinalContent = computed(
   () => state.value?.lesson_plan.current_content || "",
 );
+const finalPreview = computed(() =>
+  navigationPreview(
+    selectedVersion.value === null
+      ? state.value?.lesson_plan
+      : state.value?.lesson_plan_versions.find(
+          (version) => version.round_number === selectedVersion.value,
+        ),
+  ),
+);
+const finalDocument = computed(() => finalPreview.value.document);
+const finalWarnings = computed(() => finalPreview.value.warnings);
+const currentDocument = computed(() => {
+  const doc = state.value?.lesson_plan.structured_content,
+    source = current.value?.source_ref;
+  return doc && source ? sectionDocument(doc, source) : null;
+});
 const stage = computed(() =>
   !state.value
     ? 0
@@ -402,7 +412,13 @@ onMounted(async () => {
                   >当前版本 V{{ current.version.version_number }}</el-tag
                 >
               </div>
-              <pre class="lesson-text">{{ current.current_content }}</pre>
+              <LessonDocumentPreview
+                v-if="currentDocument"
+                :document="currentDocument"
+              />
+              <pre v-else class="lesson-text">{{
+                current.current_content
+              }}</pre>
             </section>
 
             <section class="feedback-area">
@@ -644,7 +660,10 @@ onMounted(async () => {
               />
             </el-select>
           </div>
-          <pre class="lesson-text final-text">{{ finalContent }}</pre>
+          <LessonDocumentPreview
+            :document="finalDocument"
+            :warnings="finalWarnings"
+          />
         </section>
 
         <NavigationTransferPanel

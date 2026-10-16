@@ -19,8 +19,14 @@ import jakarta.persistence.LockModeType;
 
 public interface LessonJobRepository extends JpaRepository<LessonJob, String> {
     Optional<LessonJob> findByIdempotencyKey(String idempotencyKey);
+    // Current read after the owner row lock: do not reuse a pre-lock MySQL RR snapshot.
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
     Optional<LessonJob> findByIdempotencyKeyAndOwnerId(String idempotencyKey, String ownerId);
     Optional<LessonJob> findByIdAndOwnerId(String id, String ownerId);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select j from LessonJob j where j.id = :id and j.ownerId = :owner")
+    Optional<LessonJob> lockOwnedJob(@Param("id") String id, @Param("owner") String owner);
 
     long countByStatusIn(Collection<JobStatus> statuses);
 

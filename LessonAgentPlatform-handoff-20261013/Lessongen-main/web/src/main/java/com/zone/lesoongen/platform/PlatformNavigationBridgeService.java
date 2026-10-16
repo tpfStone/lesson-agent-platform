@@ -42,17 +42,28 @@ public class PlatformNavigationBridgeService {
     private final ObjectMapper mapper;
     private final RestClient f4;
     private final TransactionTemplate transactions;
+    private final TransactionTemplate submissionTransactions;
+    private final CapabilityAdmissionPolicy admission;
+    private final com.zone.lesoongen.auth.PlatformAccessService access;
 
     public PlatformNavigationBridgeService(JdbcTemplate db, PlatformLessonService lessons,
                                            PlatformIssueIngestService issueIngest,
                                            PlatformIssueContextService issueContext,
                                            ObjectMapper mapper, PlatformTransactionManager transactionManager,
                                            PlatformLessonDocumentService documents,
-                                           @Value("${platform.f4.base-url:http://127.0.0.1:8000}") String baseUrl) {
+                                           @Value("${platform.f4.base-url:http://127.0.0.1:8000}") String baseUrl,
+                                           CapabilityAdmissionPolicy admission,
+                                           com.zone.lesoongen.auth.PlatformAccessService access) {
         this.db = db; this.lessons = lessons; this.issueIngest = issueIngest;
         this.issueContext = issueContext; this.mapper = mapper;
         this.documents = documents;
+        this.admission = admission;
+        this.access = access;
         transactions = new TransactionTemplate(transactionManager);
+        submissionTransactions = new TransactionTemplate(transactionManager);
+        // New keys must not retain InnoDB RR gap locks across independent owners.
+        // Existing-key/owner row locks and the primary key still serialize replays.
+        submissionTransactions.setIsolationLevel(org.springframework.transaction.TransactionDefinition.ISOLATION_READ_COMMITTED);
         SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
         factory.setConnectTimeout(Duration.ofSeconds(5));
         factory.setReadTimeout(Duration.ofSeconds(180));
@@ -70,9 +81,33 @@ public class PlatformNavigationBridgeService {
     private record Head(String id, int number, String hash) {}
     private record Snapshot(String sessionId, String roundId, int roundNumber, String status,
             String original, String content, String hash, Map<?, ?> metadata, LessonDocument document) {}
+    private record RequestIdentity(String lessonId, String versionId, String subject, String grade, String topic) {}
+    private record Submission(String owner, String lesson, String version, String fingerprint,
+            String payload, String session) {}
 
     public Started start(String lessonId, String versionId, UUID requestKey,
             String subject, String grade, String topic) {
+        access.requireOwnedLesson(lessonId);
+        return startChecked(lessonId, versionId, requestKey, subject, grade, topic, access.currentUserId(), null);
+    }
+
+    /** Internal continuation: possession of a UUID alone does not bypass admission. */
+    Started startForAdmittedSimulation(UUID launchId) {
+        var launch = admittedSimulation(launchId, false);
+        return startChecked((String) launch.get("lesson_id"), (String) launch.get("version_id"), launchId,
+                null, null, null, (String) launch.get("owner_user_id"), launchId);
+    }
+
+    private Map<String, Object> admittedSimulation(UUID launchId, boolean lock) {
+        var rows = db.queryForList("SELECT s.lesson_id, s.version_id, l.owner_user_id FROM platform_simulation_launch s "
+                + "JOIN platform_lesson l ON l.id = s.lesson_id WHERE s.launch_id = ? AND s.state = 'RUNNING'"
+                + (lock ? " FOR UPDATE" : ""), launchId.toString());
+        if (rows.isEmpty()) throw conflict("F3_ADMISSION_NOT_ACTIVE", "原课堂任务已停止或不存在，不能继续创建导航输入。");
+        return rows.get(0);
+    }
+
+    private Started startChecked(String lessonId, String versionId, UUID requestKey,
+            String subject, String grade, String topic, String owner, UUID admittedLaunch) {
         LessonDetail detail = lessons.detail(lessonId);
         var version = detail.versions().stream().filter(v -> v.id().equals(versionId))
                 .findFirst().orElseThrow(() -> AppException.notFound("教案版本"));
@@ -84,6 +119,17 @@ public class PlatformNavigationBridgeService {
             throw new AppException(HttpStatus.BAD_REQUEST, "F4_METADATA_REQUIRED",
                     "无法从教案中获取有效的课题，请在“我的教案”中补充教案标题后重试。");
         }
+        String fingerprint = sha256(mapper.writeValueAsString(new RequestIdentity(lessonId, versionId,
+                f4Subject, f4Grade, f4Topic)));
+        Submission accepted = submission(requestKey, false);
+        if (accepted != null) {
+            validateSubmission(accepted, owner, lessonId, versionId, fingerprint);
+            return completeSubmission(requestKey, accepted);
+        }
+        Started legacy = restoreLegacySubmission(requestKey, owner, lessonId, versionId,
+                fingerprint, f4Subject, f4Grade, f4Topic, version.content());
+        if (legacy != null) return legacy;
+
         String additionalContext = issueContext.f4AdditionalContext(lessonId, version.id());
 
         Map<String, Object> metadata = new java.util.LinkedHashMap<>();
@@ -108,20 +154,121 @@ public class PlatformNavigationBridgeService {
         } catch (AppException missing) {
             if (!"LESSON_DOCUMENT_NOT_FOUND".equals(missing.code())) throw missing;
         }
-        Map<?, ?> response = nativeRequest("/sessions", payload);
+        String serialized = mapper.writeValueAsString(payload);
+        try {
+            accepted = submissionTransactions.execute(status -> {
+                db.queryForObject("SELECT id FROM platform_user WHERE id = ? FOR UPDATE", String.class, owner);
+                Submission raced = submission(requestKey, true);
+                if (raced != null) {
+                    validateSubmission(raced, owner, lessonId, versionId, fingerprint);
+                    return raced;
+                }
+                String admittedVersion;
+                if (admittedLaunch == null) admittedVersion = admission.requireNew(CapabilityAdmissionPolicy.Capability.F4);
+                else {
+                    var launch = admittedSimulation(admittedLaunch, true);
+                    if (!lessonId.equals(launch.get("lesson_id")) || !versionId.equals(launch.get("version_id"))
+                            || !owner.equals(launch.get("owner_user_id"))) throw invalidNative();
+                    admittedVersion = "admitted-f3-" + admittedLaunch;
+                }
+                Submission value = new Submission(owner, lessonId, versionId, fingerprint, serialized, null);
+                insertSubmission(requestKey, value, admittedVersion);
+                return value;
+            });
+        } catch (DataIntegrityViolationException race) {
+            accepted = submission(requestKey, false);
+            if (accepted == null) throw race;
+            validateSubmission(accepted, owner, lessonId, versionId, fingerprint);
+        }
+        return completeSubmission(requestKey, accepted);
+    }
+
+    private Submission submission(UUID requestKey, boolean lock) {
+        return db.query("SELECT owner_user_id, lesson_id, source_version_id, request_fingerprint, request_json, session_id "
+                + "FROM platform_navigation_submission WHERE request_key = ?" + (lock ? " FOR UPDATE" : ""),
+                (rs, row) -> new Submission(rs.getString(1), rs.getString(2), rs.getString(3),
+                        rs.getString(4), rs.getString(5), rs.getString(6)), requestKey.toString())
+                .stream().findFirst().orElse(null);
+    }
+
+    private void validateSubmission(Submission value, String owner, String lesson, String version, String fingerprint) {
+        if (!owner.equals(value.owner())) throw AppException.notFound("导航提交");
+        if (!lesson.equals(value.lesson()) || !version.equals(value.version()) || !fingerprint.equals(value.fingerprint()))
+            throw conflict("F4_REQUEST_REUSED", "此提交编号已用于不同教案版本或请求内容，请新建提交。");
+    }
+
+    private void insertSubmission(UUID key, Submission value, String admissionVersion) {
+        Timestamp now = Timestamp.from(Instant.now());
+        db.update("INSERT INTO platform_navigation_submission (request_key, owner_user_id, lesson_id, source_version_id, "
+                + "request_fingerprint, request_json, admission_version, session_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                key.toString(), value.owner(), value.lesson(), value.version(), value.fingerprint(), value.payload(),
+                admissionVersion, value.session(), now, now);
+    }
+
+    private Started completeSubmission(UUID key, Submission accepted) {
+        if (accepted.session() != null) return new Started(accepted.session(), accepted.lesson(), accepted.version());
+        if (accepted.payload() == null) throw invalidNative();
+        Map<?, ?> response = nativeRequest("/sessions", mapper.readValue(accepted.payload(), Map.class));
         Map<?, ?> session = object(response.get("session"));
         String sessionId = text(session.get("id"));
         try { sessionId = UUID.fromString(sessionId).toString(); }
         catch (IllegalArgumentException invalid) { throw invalidNative(); }
         final String nativeId = sessionId;
         return transactions.execute(status -> {
-            lockHead(lessonId);
+            Submission current = submission(key, true);
+            validateSubmission(current, accepted.owner(), accepted.lesson(), accepted.version(), accepted.fingerprint());
+            if (current.session() != null && !current.session().equals(nativeId)) throw invalidNative();
+            lockHead(accepted.lesson());
             Binding existing = binding(nativeId);
-            if (existing == null) insertBinding(nativeId, lessonId, versionId);
-            else if (!existing.lessonId().equals(lessonId) || !existing.sourceVersionId().equals(versionId)) {
+            if (existing == null) insertBinding(nativeId, accepted.lesson(), accepted.version());
+            else if (!existing.lessonId().equals(accepted.lesson()) || !existing.sourceVersionId().equals(accepted.version())) {
                 throw conflict("F4_SESSION_ALREADY_BOUND", "此会话已关联到其他教案版本，请重新开始导航分析。");
             }
-            return new Started(nativeId, lessonId, versionId);
+            db.update("UPDATE platform_navigation_submission SET session_id = ?, updated_at = ? WHERE request_key = ?",
+                    nativeId, Timestamp.from(Instant.now()), key.toString());
+            return new Started(nativeId, accepted.lesson(), accepted.version());
+        });
+    }
+
+    private Started restoreLegacySubmission(UUID key, String owner, String lessonId, String versionId,
+            String fingerprint, String subject, String grade, String topic, String content) {
+        var possible = db.query("SELECT n.session_id FROM platform_navigation_link n LEFT JOIN platform_navigation_submission s "
+                + "ON s.session_id = n.session_id WHERE n.lesson_id = ? AND s.request_key IS NULL",
+                (rs, row) -> rs.getString(1), lessonId);
+        if (possible.isEmpty()) return null;
+        List<?> remote;
+        try { remote = f4.get().uri("/api/sessions").retrieve().body(List.class); }
+        catch (RestClientException failure) {
+            throw new AppException(HttpStatus.SERVICE_UNAVAILABLE, "F4_LEGACY_LOOKUP_UNAVAILABLE",
+                    "暂时无法只读核对旧导航提交；请恢复 F4 服务后重试，不会另建会话。");
+        }
+        if (remote == null) throw invalidNative();
+        var matches = remote.stream().filter(item -> item instanceof Map<?, ?> value
+                && key.toString().equals(value.get("request_key"))).map(item -> (Map<?, ?>) item).toList();
+        if (matches.isEmpty()) return null;
+        if (matches.size() != 1) throw invalidNative();
+        String id = text(matches.get(0).get("id"));
+        Binding bound = binding(id);
+        if (!possible.contains(id) || bound == null || !lessonId.equals(bound.lessonId())
+                || !versionId.equals(bound.sourceVersionId())) throw conflict("F4_REQUEST_REUSED", "此提交编号属于其他来源，请恢复原会话。");
+        Map<?, ?> state = nativeRequest("/sessions/" + id + "/current-state", null);
+        Map<?, ?> session = object(state.get("session")), plan = object(state.get("lesson_plan"));
+        Map<?, ?> metadata = object(session.get("lesson_metadata"));
+        if (!id.equals(session.get("id")) || !key.toString().equals(session.get("request_key"))
+                || !subject.equals(metadata.get("subject")) || !grade.equals(metadata.get("grade"))
+                || !topic.equals(metadata.get("topic")) || !content.equals(plan.get("original_content")))
+            throw conflict("F4_REQUEST_REUSED", "旧提交的原稿或请求内容不一致，不能复用该编号。");
+        if (plan.get("source_binding") instanceof Map<?, ?> source && !source.isEmpty()
+                && (!lessonId.equals(source.get("lessonId")) || !versionId.equals(source.get("versionId"))))
+            throw conflict("F4_REQUEST_REUSED", "旧提交的来源版本不一致，不能复用该编号。");
+        return submissionTransactions.execute(status -> {
+            db.queryForObject("SELECT id FROM platform_user WHERE id = ? FOR UPDATE", String.class, owner);
+            Submission raced = submission(key, true);
+            if (raced != null) {
+                validateSubmission(raced, owner, lessonId, versionId, fingerprint);
+                if (!id.equals(raced.session())) throw invalidNative();
+            } else insertSubmission(key, new Submission(owner, lessonId, versionId, fingerprint, null, id), "legacy-read-verified");
+            return new Started(id, lessonId, versionId);
         });
     }
 

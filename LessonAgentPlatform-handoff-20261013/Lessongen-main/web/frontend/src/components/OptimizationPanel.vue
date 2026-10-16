@@ -2,6 +2,7 @@
 import { computed } from "vue";
 import type { OptimizationSummary } from "../types/api";
 import {
+  formatBaselineWarning,
   formatTeachingContent,
   lessonPathLabel,
 } from "../utils/lessonPresentation";
@@ -96,6 +97,7 @@ function progressLabel(progress?: string) {
 
 function treatmentLabel(item: OptimizationSummary["reviewed_issues"][number]) {
   const value = `${item.status || ""} ${item.decision || ""}`.toLowerCase();
+  if (/defer/.test(value)) return "仅保留建议";
   if (/unresolved|reject|blocked|failed|open|pending/.test(value))
     return "仍需关注";
   if (/implement|accept|approve|applied|resolved|complete/.test(value))
@@ -104,7 +106,9 @@ function treatmentLabel(item: OptimizationSummary["reviewed_issues"][number]) {
 }
 
 function treatmentClass(item: OptimizationSummary["reviewed_issues"][number]) {
-  return treatmentLabel(item) === "仍需关注" ? "attention" : "handled";
+  return ["仍需关注", "仅保留建议"].includes(treatmentLabel(item))
+    ? "attention"
+    : "handled";
 }
 
 function cleanText(value?: string | null) {
@@ -127,6 +131,23 @@ function cleanText(value?: string | null) {
     </header>
 
     <p class="review-conclusion">{{ reviewConclusion }}</p>
+    <div
+      v-if="summary.scope"
+      class="review-conclusion"
+      aria-label="本次优化范围"
+    >
+      <p v-if="summary.scope.mode === 'local'">
+        本次仅修改：{{
+          summary.scope.editable_paths.map(lessonPathLabel).join("、")
+        }}。其他栏目保持原样；范围外的问题仅作建议。
+      </p>
+      <p v-else>本次采用全文优化，按整份教案的完整性要求校验。</p>
+      <ul v-if="summary.baseline_warnings?.length">
+        <li v-for="warning in summary.baseline_warnings" :key="warning">
+          {{ formatBaselineWarning(warning) }}
+        </li>
+      </ul>
+    </div>
 
     <details class="quality-drawer">
       <summary>查看内部质量依据</summary>

@@ -15,6 +15,7 @@ import ResultDownloadPanel, {
 } from "../components/ResultDownloadPanel.vue";
 import LessonPreview from "../components/LessonPreview.vue";
 import ReviewDocumentPreview from "../components/ReviewDocumentPreview.vue";
+import DocumentDownloadNotice from "../components/DocumentDownloadNotice.vue";
 import OptimizationPanel from "../components/OptimizationPanel.vue";
 import { useWorkflowStore } from "../stores/workflow";
 
@@ -916,6 +917,10 @@ onBeforeUnmount(() => {
           <button type="button" @click="retryArtifacts">重新读取文件</button>
         </p>
 
+        <DocumentDownloadNotice
+          v-if="downloadFiles.length"
+          :lesson-id="linkedLessonId || generatedLesson?.lessonId"
+        />
         <ResultDownloadPanel :files="downloadFiles" />
       </template>
     </template>

@@ -5,8 +5,11 @@ import axios from "axios";
 import AppPageHeader from "../components/AppPageHeader.vue";
 import ReviewDocumentPreview from "../components/ReviewDocumentPreview.vue";
 import LessonDocumentPreview from "../components/LessonDocumentPreview.vue";
+import DocumentWarnings from "../components/DocumentWarnings.vue";
+import DocumentDownloadNotice from "../components/DocumentDownloadNotice.vue";
 import LessonIssuePanel from "../components/LessonIssuePanel.vue";
 import { useVersionDocument } from "../composables/useVersionDocument";
+import { useDialogFocus } from "../composables/useDialogFocus";
 interface Lesson {
   id: string;
   title: string;
@@ -45,6 +48,97 @@ const selected = computed(
   () =>
     detail.value?.versions.find((item) => item.id === selectedId.value) || null,
 );
+const editing = ref(false),
+  saving = ref(false),
+  conflict = ref(false);
+const editDialog = ref<HTMLElement | null>(null);
+const draftContent = ref(""),
+  editError = ref(""),
+  editNotice = ref("");
+const editBase = ref(""),
+  baseContent = ref("");
+let editGeneration = 0;
+function closeEditor() {
+  if (!saving.value) {
+    editing.value = false;
+    editGeneration++;
+  }
+}
+useDialogFocus(editing, editDialog, closeEditor);
+function startEditing() {
+  if (!selected.value) return;
+  editBase.value = selected.value.id;
+  draftContent.value = baseContent.value = selected.value.content;
+  editError.value = editNotice.value = "";
+  conflict.value = false;
+  editing.value = true;
+}
+async function saveEdit() {
+  if (saving.value || conflict.value || !draftContent.value.trim()) return;
+  const request = editGeneration,
+    id = lessonId.value;
+  saving.value = true;
+  editError.value = "";
+  try {
+    const created = (
+      await axios.post<Detail>(
+        `/api/platform/lessons/${encodeURIComponent(id)}/versions`,
+        {
+          expectedVersionId: editBase.value,
+          content: draftContent.value,
+        },
+      )
+    ).data;
+    if (request !== editGeneration) return;
+    editing.value = false;
+    await router.push({
+      query: { ...route.query, version: created.lesson.currentVersionId },
+    });
+    void loadList();
+  } catch (reason) {
+    if (request !== editGeneration) return;
+    conflict.value =
+      axios.isAxiosError(reason) && reason.response?.status === 409;
+    editError.value = conflict.value
+      ? "此教案已有更新版本，未覆盖任何内容。你的草稿已保留，请加载最新版本并核对后再保存。"
+      : describe(reason);
+  } finally {
+    if (request === editGeneration) saving.value = false;
+  }
+}
+async function reloadEditBase() {
+  if (saving.value) return;
+  const request = editGeneration;
+  saving.value = true;
+  try {
+    const latest = (
+      await axios.get<Detail>(
+        `/api/platform/lessons/${encodeURIComponent(lessonId.value)}`,
+      )
+    ).data;
+    if (request !== editGeneration) return;
+    const base = latest.versions.find(
+      (v) => v.id === latest.lesson.currentVersionId,
+    );
+    if (!base) throw new Error("没有找到最新版本，请重试。");
+    editBase.value = base.id;
+    baseContent.value = base.content;
+    conflict.value = false;
+    editError.value = "";
+    editNotice.value =
+      "已加载最新版本，草稿仍保留。请展开下方最新正文进行对照，合并需要保留的内容后再保存。";
+    await router.push({ query: { ...route.query, version: base.id } });
+  } catch (reason) {
+    if (request === editGeneration) editError.value = describe(reason);
+  } finally {
+    if (request === editGeneration) saving.value = false;
+  }
+}
+watch(lessonId, () => {
+  editGeneration++;
+  editing.value = saving.value = false;
+  draftContent.value = baseContent.value = "";
+});
 const exportUrl = computed(() =>
   lessonId.value && selectedId.value
     ? `/api/platform/lessons/${encodeURIComponent(lessonId.value)}/versions/${encodeURIComponent(selectedId.value)}/export/docx`
@@ -95,6 +189,7 @@ const pdfAvailable = ref(false);
 let detailGeneration = 0;
 onUnmounted(() => {
   detailGeneration++;
+  editGeneration++;
 });
 const {
   snapshot,
@@ -177,7 +272,7 @@ watch(
       :description="
         lessonId
           ? '查看教案正文、版本来源与下载文件。'
-          : '集中管理已导入或生成的教案。上传新教案请返回首页。'
+          : '集中管理已导入或生成的教案。点击上传教案导入 DOCX。'
       "
       ><template #actions
         ><RouterLink
@@ -185,8 +280,11 @@ watch(
           class="v2-button v2-button--secondary"
           to="/lessons"
           >返回教案列表</RouterLink
-        ><RouterLink v-else class="v2-button v2-button--primary" to="/"
-          >上传或生成教案</RouterLink
+        ><RouterLink
+          v-else
+          class="v2-button v2-button--primary"
+          to="/review?upload=1"
+          >上传教案</RouterLink
         ></template
       ></AppPageHeader
     >
@@ -214,9 +312,12 @@ watch(
       </section>
       <section v-else-if="!loading" class="empty v2-card">
         <h2>还没有教案</h2>
-        <p>从首页上传 DOCX，或使用设计修改功能生成第一份教案。</p>
-        <RouterLink class="v2-button v2-button--primary" to="/"
-          >返回首页</RouterLink
+        <p>上传 DOCX，或使用从零生成功能创建第一份教案。</p>
+        <RouterLink class="v2-button v2-button--primary" to="/review?upload=1"
+          >上传教案</RouterLink
+        >
+        <RouterLink class="v2-button v2-button--secondary" to="/create/generate"
+          >从零生成教案</RouterLink
         >
       </section>
       <p v-else class="loading">正在读取教案……</p></template
@@ -258,6 +359,14 @@ watch(
                 {{ selected ? `创建于 ${formatTime(selected.createdAt)}` : "" }}
               </p>
             </div>
+            <button
+              v-if="selected"
+              type="button"
+              class="v2-button v2-button--secondary"
+              @click="startEditing"
+            >
+              编辑此版本
+            </button>
             <a
               v-if="exportUrl"
               class="v2-button v2-button--primary"
@@ -272,6 +381,14 @@ watch(
               >下载 PDF</a
             >
           </header>
+          <DocumentDownloadNotice
+            v-if="exportUrl"
+            :source-href="
+              source
+                ? `/api/platform/lessons/${encodeURIComponent(lessonId)}/source-document/file`
+                : undefined
+            "
+          />
           <div v-if="source" class="source-note">
             <span
               >原始文件：{{ source.originalFilename }} ·
@@ -291,6 +408,9 @@ watch(
             ><p v-if="documentState === 'fallback'" class="source-note">
               此版本使用正文兼容显示，教学表格尚未确认恢复。
             </p>
+            <DocumentWarnings
+              v-if="documentState === 'fallback'"
+              :warnings="snapshot?.warnings" />
             <LessonDocumentPreview
               v-if="snapshot && documentState === 'ready'"
               :document="snapshot.document"
@@ -342,10 +462,119 @@ watch(
         :version-id="selectedId"
       />
     </template>
+    <Teleport to="body">
+      <div v-if="editing" class="edit-backdrop" @click.self="closeEditor">
+        <section
+          ref="editDialog"
+          class="edit-dialog"
+          role="dialog"
+          aria-modal="true"
+          aria-label="编辑教案正文"
+          tabindex="-1"
+        >
+          <h2>编辑教案正文</h2>
+          <p>
+            保存会创建新版本并保留历史版本。自由编辑后将按正文生成兼容结构，原有表格布局及语义可能无法完整保留；原始
+            DOCX 可继续下载。
+          </p>
+          <label
+            >教案正文<textarea
+              v-model="draftContent"
+              maxlength="100000"
+              rows="14"
+              :disabled="saving"
+            />
+          </label>
+          <p v-if="editNotice" role="status">{{ editNotice }}</p>
+          <details :open="Boolean(editNotice)">
+            <summary>当前保存依据的版本正文（请与草稿对照）</summary>
+            <pre>{{ baseContent }}</pre>
+          </details>
+          <p v-if="editError" role="alert">{{ editError }}</p>
+          <div class="edit-actions">
+            <button
+              type="button"
+              class="v2-button v2-button--secondary"
+              :disabled="saving"
+              @click="closeEditor"
+            >
+              取消
+            </button>
+            <button
+              v-if="conflict"
+              type="button"
+              class="v2-button v2-button--secondary"
+              :disabled="saving"
+              @click="reloadEditBase"
+            >
+              加载最新版本
+            </button>
+            <button
+              type="button"
+              class="v2-button v2-button--primary"
+              :disabled="
+                saving ||
+                conflict ||
+                !draftContent.trim() ||
+                draftContent === baseContent
+              "
+              @click="saveEdit"
+            >
+              {{ saving ? "正在处理……" : "保存为新版本" }}
+            </button>
+          </div>
+        </section>
+      </div>
+    </Teleport>
   </main>
 </template>
 
 <style scoped>
+.edit-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 330;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(23, 43, 72, 0.44);
+}
+.edit-dialog {
+  width: min(900px, 100%);
+  min-width: 0;
+  max-height: 90vh;
+  overflow: auto;
+  padding: 24px;
+  background: white;
+  border-radius: var(--radius-lg);
+  overflow-wrap: anywhere;
+}
+.edit-dialog label {
+  display: grid;
+  gap: 8px;
+}
+.edit-dialog textarea {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  resize: vertical;
+  padding: 12px;
+  line-height: 1.6;
+}
+.edit-dialog pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.edit-dialog [role="alert"] {
+  color: var(--color-danger);
+}
+.edit-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 20px;
+}
 .lessons-page {
   display: grid;
   gap: 22px;

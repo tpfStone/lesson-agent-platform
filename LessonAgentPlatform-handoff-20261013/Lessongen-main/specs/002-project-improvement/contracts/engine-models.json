@@ -102,6 +102,17 @@
               "title": "Optimization Focus",
               "type": "array"
             },
+            "optimization_scope": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/OptimizationScope"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
             "student_profile": {
               "default": "",
               "maxLength": 8000,
@@ -149,6 +160,32 @@
           ],
           "title": "EngineMode",
           "type": "string"
+        },
+        "OptimizationScope": {
+          "additionalProperties": false,
+          "properties": {
+            "editable_paths": {
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 100,
+              "title": "Editable Paths",
+              "type": "array"
+            },
+            "mode": {
+              "enum": [
+                "full",
+                "local"
+              ],
+              "title": "Mode",
+              "type": "string"
+            }
+          },
+          "required": [
+            "mode"
+          ],
+          "title": "OptimizationScope",
+          "type": "object"
         }
       },
       "additionalProperties": false,

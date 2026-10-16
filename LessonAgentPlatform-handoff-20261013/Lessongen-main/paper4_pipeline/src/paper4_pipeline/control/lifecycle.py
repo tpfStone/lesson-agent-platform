@@ -163,7 +163,14 @@ def enforce_task_evidence_constraints(
         and decision.critique_id in critique_by_id
         and _requires_immutable_identity_edit(critique_by_id[decision.critique_id])
     }
-    blocked = evidence_blocked | identity_blocked
+    from paper4_pipeline.domain.scope import path_intersects_scope
+    scope_blocked = {
+        decision.critique_id for decision in decisions
+        if decision.decision in {ValidationDecisionKind.ACCEPT, ValidationDecisionKind.MERGE}
+        and decision.critique_id in critique_by_id
+        and not path_intersects_scope(task, critique_by_id[decision.critique_id].target_path)
+    }
+    blocked = evidence_blocked | identity_blocked | scope_blocked
     if not blocked:
         return decisions
 
@@ -177,7 +184,11 @@ def enforce_task_evidence_constraints(
             guarded.append(decision)
             continue
         payload = decision.model_dump(mode="python")
-        if decision.critique_id in identity_blocked or (
+        outside_scope = decision.critique_id in scope_blocked or (
+            blocked_merge and decision.canonical_critique_id in scope_blocked)
+        if outside_scope:
+            reason = "本条意见位于本次优化范围外，仅保留为建议；未经用户扩展范围不得修改。"
+        elif decision.critique_id in identity_blocked or (
             blocked_merge and decision.canonical_critique_id in identity_blocked
         ):
             reason = (
@@ -191,7 +202,7 @@ def enforce_task_evidence_constraints(
             )
         payload.update(
             {
-                "decision": ValidationDecisionKind.REJECT,
+                "decision": ValidationDecisionKind.DEFER if outside_scope else ValidationDecisionKind.REJECT,
                 "actionable": False,
                 "conflict": True,
                 "canonical_critique_id": "",

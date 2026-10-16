@@ -5,6 +5,7 @@ LLM call deliberately holds that lock in this MVP to prevent duplicate generatio
 """
 import hashlib
 import json
+from copy import deepcopy
 from datetime import datetime, timezone
 from sqlalchemy import select, func, text
 from uuid import uuid4
@@ -77,6 +78,53 @@ class Workflow:
         return self.db.scalar(select(m.SectionVersion).where(m.SectionVersion.section_id == section_id, m.SectionVersion.user_id == self.current_user.id)
                               .order_by(m.SectionVersion.version_number.desc()).limit(1))
 
+    def history_snapshot(self, lesson):
+        document = lesson.structured_content
+        if document is not None:
+            try:
+                structured_adapter.validate(document)
+                if structured_adapter.project(document) != lesson.current_content:
+                    raise ValueError('STRUCTURE_CONTENT_MISMATCH')
+            except (ValueError, KeyError, TypeError, AttributeError) as error:
+                raise WorkflowError('版本结构与正文不一致，未保存历史快照。', 422) from error
+        return {'structured_content': deepcopy(document),
+                'content_format': 'LESSON_DOCUMENT' if document is not None else (
+                    'MIXED_FALLBACK' if lesson.fallback_projection else 'PLAIN_TEXT'),
+                'format_provenance': 'SAVED_VERSION',
+                'structure_warnings': deepcopy(lesson.structure_warnings or [])}
+
+    def history_view(self, version, lesson):
+        result = dump(version)
+        # Old rows carry no trustworthy format marker. Only the same lesson's
+        # exact current projection can supply evidence; reads never rewrite history.
+        if version.content_format is None:
+            result.update(content_format='UNKNOWN', format_provenance='UNKNOWN',
+                          structured_content=None, structure_warnings=[])
+            if (version.content == lesson.current_content and lesson.structured_content is not None
+                    and self.history_source_matches(version, lesson)):
+                try:
+                    result.update(self.history_snapshot(lesson))
+                    result['format_provenance'] = 'VERIFIED_CURRENT_MATCH'
+                except WorkflowError:
+                    pass
+        result['content_sha256'] = hashlib.sha256(version.content.encode()).hexdigest()
+        result['structure_sha256'] = structured_adapter.digest(result['structured_content']) if result['structured_content'] is not None else None
+        return result
+
+    def history_source_matches(self, version, lesson):
+        if version.round_number == 0:
+            session = self.one(m.Session, id=lesson.session_id)
+            identity = {'metadata': session.lesson_metadata, 'content': version.content,
+                        'structured_content': lesson.structured_content, 'source_binding': lesson.source_binding}
+            return hashlib.sha256(json.dumps(identity, sort_keys=True, ensure_ascii=False).encode()).hexdigest() == session.input_hash
+        events = self.rows(m.InteractionEvent, session_id=lesson.session_id)
+        checkpoint = next((event for event in events if event.event_type == 'ROUND_COMPLETED'
+            and event.event_payload.get('lesson_plan_version_id') == version.id), None)
+        # Completed-round history may borrow the current projection only while
+        # its durable checkpoint has had no later accepted content/structure edit.
+        return checkpoint is not None and not any(event.event_type == 'SECTION_UPDATED'
+            and event.sequence > checkpoint.sequence for event in events)
+
     def create_session(self, data):
         payload = data.model_dump(mode='json')
         identity = {'metadata': payload['metadata'], 'content': data.content}
@@ -105,7 +153,8 @@ class Workflow:
         self.event(session, 'SESSION_CREATED', {'config': snapshot})
         lesson = self.add(m.LessonPlan, session_id=session.id, original_content=data.content, current_content=data.content,
                           structured_content=data.structured_content, source_binding=data.source_binding)
-        original = self.add(m.LessonPlanVersion, lesson_plan_id=lesson.id, round_number=0, content=data.content)
+        original = self.add(m.LessonPlanVersion, lesson_plan_id=lesson.id, round_number=0,
+                            content=data.content, **self.history_snapshot(lesson))
         self.event(session, 'LESSON_PLAN_SUBMITTED', {'lesson_plan_id': lesson.id, 'version_id': original.id})
         self.chat(session, 'user', data.content, 'lesson_plan')
         source_refs = []
@@ -157,8 +206,11 @@ class Workflow:
             result.append({**dump(section), 'version': dump(self.latest(section.id)), 'review': dump(review),
                 'suggestions': [{**dump(s), 'decision': (dump(d) if (d := self.one(m.Decision, suggestion_id=s.id)) else None)}
                                  for s in suggestions]})
-        return {'session': dump(session), 'lesson_plan': dump(lesson), 'round': dump(round), 'sections': result,
-                'lesson_plan_versions': [dump(v) for v in sorted(self.rows(m.LessonPlanVersion, lesson_plan_id=lesson.id),
+        current_plan = dump(lesson)
+        current_plan['content_format'] = 'LESSON_DOCUMENT' if lesson.structured_content is not None else (
+            'MIXED_FALLBACK' if lesson.fallback_projection else 'PLAIN_TEXT')
+        return {'session': dump(session), 'lesson_plan': current_plan, 'round': dump(round), 'sections': result,
+                'lesson_plan_versions': [self.history_view(v, lesson) for v in sorted(self.rows(m.LessonPlanVersion, lesson_plan_id=lesson.id),
                                                                key=lambda v: v.round_number)]}
 
     def resume_session(self, session_id):
@@ -329,7 +381,8 @@ class Workflow:
             session.status, session.current_section_id = 'ROUND_COMPLETED', None
             lesson = self.one(m.LessonPlan, session_id=session.id)
             version = self.add(m.LessonPlanVersion, lesson_plan_id=lesson.id,
-                               round_number=round.round_number, content=lesson.current_content)
+                               round_number=round.round_number, content=lesson.current_content,
+                               **self.history_snapshot(lesson))
             self.event(session, 'ROUND_COMPLETED', {'lesson_plan_version_id': version.id}, round.id)
 
     def continue_round(self, session, round_id):

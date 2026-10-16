@@ -19,6 +19,7 @@ from typing import Dict, List, Optional, Tuple, Any
 
 from docx import Document
 from docx.text.paragraph import Paragraph
+from annotator import _font_family
 
 
 DEFAULT_AUTHOR = "AI批注助手"
@@ -225,7 +226,10 @@ def _safe_add_comment(doc, runs, text: str, author: str, initials: str) -> bool:
     if not runs:
         return False
     try:
-        doc.add_comment(runs, text=text, author=author, initials=initials)
+        comment = doc.add_comment(runs, text=text, author=author, initials=initials)
+        for paragraph in comment.paragraphs:
+            for run in paragraph.runs:
+                _font_family(run._element.get_or_add_rPr(), "SimSun")
         return True
     except Exception as e:
         print(f"    ⚠ 添加批注失败：{e}")
@@ -315,6 +319,9 @@ def generate_annotated_docx(
 
     # ---- 策略 4：文末汇总未定位批注 ----
     if unresolved:
+        # Keep every original run and style; only the appended paragraphs below
+        # receive the platform's generated-text font policy.
+        appended_start = len(doc.paragraphs)
         doc.add_paragraph("")
         head = doc.add_paragraph()
         head.add_run("未定位批注汇总").bold = True
@@ -331,6 +338,10 @@ def generate_annotated_docx(
             q.add_run(f"原文引用：{a['quote'] or '（无）'}")
             # 批注锚定在本条标题段（跨段落 run 组合不被支持）
             _safe_add_comment(doc, p.runs, _build_comment_text(a), author, initials)
+        for paragraph in doc.paragraphs[appended_start:]:
+            for run in paragraph.runs:
+                _font_family(run._element.get_or_add_rPr(),
+                             "SimHei" if run.text == "未定位批注汇总" else "SimSun")
 
     os.makedirs(os.path.dirname(output_path) if os.path.dirname(output_path) else ".", exist_ok=True)
     try:

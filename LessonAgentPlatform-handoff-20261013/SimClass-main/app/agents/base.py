@@ -6,6 +6,7 @@ Interaction functions 是 MVP 的工程实现，不是论文公开代码中的�
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+from ..llm.metering import metered_operation
 
 if TYPE_CHECKING:
     from ..controller.state import ClassState
@@ -68,6 +69,7 @@ class BaseAgent:
             lines.append(f"用户最新消息: {state.pending_user_message}")
         return "\n".join(lines)
 
+    @metered_operation('classroom_agent')
     def _respond(self, state: "ClassState", instruction: str) -> str:
         messages = self.build_messages(state, instruction)
         return self.llm.chat(messages).strip()
