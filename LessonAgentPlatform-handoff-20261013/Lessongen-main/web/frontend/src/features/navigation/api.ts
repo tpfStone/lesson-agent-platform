@@ -102,7 +102,7 @@ export interface Suggestion {
   decision: { id: string; decision: "ACCEPT" | "REJECT" } | null;
 }
 export interface Section {
-  source_ref?: { blockId: string; rowId?: string; sourceRowIndex?: number };
+  source_ref?: import("../../utils/projectedLesson").SectionSource;
   id: string;
   order_index: number;
   title: string;

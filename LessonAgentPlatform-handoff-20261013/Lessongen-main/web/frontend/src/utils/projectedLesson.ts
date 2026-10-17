@@ -1,5 +1,12 @@
 import type { LessonDocument } from "../types/lesson-document";
 
+export interface SectionSource {
+  blockIds?: string[];
+  blockId?: string;
+  rowId?: string;
+  sourceRowIndex?: number;
+}
+
 export function navigationPreview(
   snapshot?: {
     content?: string;
@@ -99,8 +106,21 @@ function splitCells(line: string, decode: boolean): string[] {
 
 export function sectionDocument(
   document: LessonDocument,
-  source: { blockId: string; rowId?: string; sourceRowIndex?: number },
+  source: SectionSource,
 ): LessonDocument | null {
+  if (source.blockIds) {
+    const ids = source.blockIds;
+    const start = document.blocks.findIndex((block) => block.id === ids[0]);
+    const blocks = document.blocks.slice(start, start + ids.length);
+    if (
+      !ids.length ||
+      start < 0 ||
+      blocks.length !== ids.length ||
+      blocks.some((block, index) => block.id !== ids[index])
+    )
+      return null;
+    return { schemaVersion: document.schemaVersion, blocks };
+  }
   const block = document.blocks.find((b) => b.id === source.blockId);
   if (!block) return null;
   if (!source.rowId)

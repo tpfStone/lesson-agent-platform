@@ -43,10 +43,12 @@ def test_structured_session_preserves_full_coverage(client):
         "structured_content": doc})
     assert response.status_code == 200
     state = response.json()
-    assert len(state['sections']) == 8
+    assert [section['title'] for section in state['sections']] == ['教学目标', '教学过程', '作业']
     assert state['lesson_plan']['structured_content']['blocks'][1]['tableRows'][6][2] == '回答5'
     assert state['lesson_plan']['current_content'] == content
-    assert len([s for s in state['sections'] if s['source_ref'].get('rowId')]) == 6
+    assert state['sections'][1]['source_ref']['blockIds'] == ['process']
+    assert '环节0' in state['sections'][1]['current_content']
+    assert '回答5' in state['sections'][1]['current_content']
 
 
 def test_unknown_schema_is_explicit(client):

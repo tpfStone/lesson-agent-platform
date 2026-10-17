@@ -88,6 +88,18 @@ const currentDocument = computed(() => {
     source = current.value?.source_ref;
   return doc && source ? sectionDocument(doc, source) : null;
 });
+const overviewDocument = computed(() => {
+  const document = state.value?.lesson_plan.structured_content;
+  const firstId = state.value?.sections[0]?.source_ref?.blockIds?.[0];
+  if (!document || !firstId) return null;
+  const end = document.blocks.findIndex((block) => block.id === firstId);
+  return end > 0
+    ? {
+        schemaVersion: document.schemaVersion,
+        blocks: document.blocks.slice(0, end),
+      }
+    : null;
+});
 const stage = computed(() =>
   !state.value
     ? 0
@@ -354,6 +366,11 @@ onMounted(async () => {
           </div>
         </section>
 
+        <details v-if="overviewDocument" class="lesson-overview v2-card">
+          <summary>教案基本信息</summary>
+          <LessonDocumentPreview :document="overviewDocument" />
+        </details>
+
         <nav class="f4-stage-bar" aria-label="协同共析进度">
           <div
             v-for="(label, index) in [
@@ -373,7 +390,7 @@ onMounted(async () => {
         <div v-if="status === 'ACTIVE' && current" class="review-layout">
           <aside class="section-nav v2-card">
             <div class="section-nav-heading">
-              <div><small>教学单元</small><strong>逐节共析</strong></div>
+              <div><small>共析单元</small><strong>逐节共析</strong></div>
               <span>{{ completed }} / {{ state.sections.length }}</span>
             </div>
             <el-progress
@@ -395,7 +412,10 @@ onMounted(async () => {
                 <span>{{ section.title }}</span>
               </li>
             </ol>
-            <p>按顺序完成每个单元，已完成的决定会自动保存。</p>
+            <p v-if="current.source_ref?.blockIds">
+              每个大标题及其下的内容合为一个单元，完成取舍后继续下一节。
+            </p>
+            <p v-else>按顺序完成每个单元，已完成的决定会自动保存。</p>
           </aside>
 
           <div class="review-main">

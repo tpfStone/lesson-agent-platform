@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     case_retriever: str = 'metadata'
     knowledge_retriever: str = 'metadata'
     retrieval_top_k: int = Field(default=3, ge=1, le=10)
-    section_parser: str = 'bounded_v2'
+    section_parser: str = 'chapters_v3'
     revision_strategy: str = 'replace_or_append_v2'
 
 

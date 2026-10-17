@@ -50,6 +50,19 @@
   font-size: 12px;
   font-weight: 800;
 }
+.lesson-overview {
+  margin-bottom: 16px;
+  padding: 16px 21px;
+}
+.lesson-overview summary {
+  cursor: pointer;
+  color: var(--color-text-secondary);
+  font-size: 14px;
+  font-weight: 600;
+}
+.lesson-overview[open] summary {
+  margin-bottom: 14px;
+}
 .session-copy h2 {
   margin: 5px 0 4px;
   font-size: 20px;

@@ -311,6 +311,7 @@ class Workflow:
             return
         round, section, _ = self.active_target(session, suggestion.round_id, suggestion.section_id)
         content = section.current_content
+        prepared_document = prepared_source = None
         if decision == 'ACCEPT':
             draft = SuggestionDraft(**{key: getattr(suggestion, key) for key in SuggestionDraft.model_fields})
             if confirm_append:
@@ -324,6 +325,21 @@ class Workflow:
                 return {'suggestion_id': suggestion.id, 'candidate': result.candidate, 'reason': result.reason,
                         'expected_version_id': self.latest(section.id).id}
             content = result.content
+            if content != section.current_content and (section.source_ref or {}).get('blockIds'):
+                lesson = self.one(m.LessonPlan, session_id=session.id)
+                prepared_source = {**section.source_ref, 'blockIds': list(section.source_ref['blockIds'])}
+                try:
+                    if lesson.structured_content is None:
+                        raise ValueError('CHAPTER_STRUCTURE_UNAVAILABLE')
+                    prepared_document = structured_adapter.revise(lesson.structured_content,
+                        prepared_source, section.current_content, content, draft)
+                    content = structured_adapter.chapter_content(prepared_document, prepared_source)
+                except ValueError:
+                    reason = '这条修改无法准确定位到单个段落、列表项或表格单元格。可保留原文，将建议补充到本章节末尾。'
+                    self.event(session, 'REVISION_CANDIDATE_SHOWN', {'suggestion_id': suggestion.id,
+                        'candidate': draft.revision, 'reason': reason}, round.id, section.id)
+                    return {'suggestion_id': suggestion.id, 'candidate': draft.revision, 'reason': reason,
+                            'expected_version_id': self.latest(section.id).id}
         saved = self.add(m.Decision, suggestion_id=suggestion.id, session_id=session.id,
                          round_id=round.id, section_id=section.id, decision=decision)
         self.chat(session, 'user', decision, 'decision', section.id, suggestion.id)
@@ -336,7 +352,11 @@ class Workflow:
                     version_number=previous.version_number + 1, previous_version_id=previous.id, content=content)
                 section.current_content = content
                 lesson = self.one(m.LessonPlan, session_id=session.id)
-                if lesson.structured_content is not None:
+                if prepared_document is not None:
+                    section.source_ref = prepared_source
+                    lesson.structured_content = prepared_document
+                    lesson.current_content = structured_adapter.project(prepared_document)
+                elif lesson.structured_content is not None:
                     try:
                         lesson.structured_content = structured_adapter.revise(lesson.structured_content,
                             section.source_ref, previous.content, content)

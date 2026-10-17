@@ -10,6 +10,7 @@ from ..contributors import (LessonContextContributor, RuleBasedContextPolicy, Se
     RuleBasedMemoryProvider, RejectOnlyMemoryProvider, NoMemoryProvider, CaseRetrievalContributor,
     KnowledgeRetrievalContributor, PreferenceContributor, NoPreferenceProvider)
 from ..retrieval import MetadataRetriever, NoOpRetriever
+from ..chapter_sections import ChapterSectionParser
 
 
 @dataclass(frozen=True)
@@ -25,6 +26,7 @@ class ExperimentConfig:
 def default_registry():
     registry = CapabilityRegistry()
     registry.register('bounded_v2', lambda **kwargs: BoundedSectionParser())
+    registry.register('chapters_v3', lambda **kwargs: ChapterSectionParser())
     registry.register('replace_or_append_v2', lambda **kwargs: ReplaceOrAppendRevisionStrategy())
     registry.register('append_v2', lambda **kwargs: AppendRevisionStrategy())
     registry.register('lesson_context', lambda history, snapshot: LessonContextContributor(RuleBasedContextPolicy()))

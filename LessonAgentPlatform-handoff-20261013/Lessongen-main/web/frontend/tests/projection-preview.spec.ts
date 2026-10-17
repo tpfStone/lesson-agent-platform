@@ -145,3 +145,36 @@ it("maps a section by its row identity, rejecting stale row offsets", () => {
   ).toBeNull();
   expect(document.blocks[0]?.tableRows).toHaveLength(3);
 });
+
+it("renders a whole chapter with all paragraphs and table rows in document order", () => {
+  const document = {
+    schemaVersion: "1.1",
+    blocks: [
+      { id: "intro", type: "paragraph", text: "五年级" },
+      { id: "h", type: "heading", level: 1, text: "教学过程" },
+      { id: "p", type: "paragraph", text: "观察图形" },
+      {
+        id: "t",
+        type: "table",
+        tableRows: [
+          ["教师", "学生"],
+          ["提问", "观察"],
+          ["引导", "解释"],
+        ],
+      },
+      { id: "next", type: "heading", level: 1, text: "作业" },
+    ],
+  };
+  const chapter = sectionDocument(document, { blockIds: ["h", "p", "t"] });
+  expect(chapter?.blocks.map((block) => block.id)).toEqual(["h", "p", "t"]);
+  const wrapper = mount(LessonDocumentPreview, {
+    props: { document: chapter! },
+  });
+  expect(wrapper.text()).toContain("教学过程");
+  expect(wrapper.text()).toContain("观察图形");
+  expect(wrapper.findAll("tr")).toHaveLength(3);
+  expect(wrapper.text()).not.toContain("五年级");
+  expect(wrapper.text()).not.toContain("作业");
+  expect(sectionDocument(document, { blockIds: ["h", "missing"] })).toBeNull();
+  expect(sectionDocument(document, { blockIds: ["h", "t"] })).toBeNull();
+});
