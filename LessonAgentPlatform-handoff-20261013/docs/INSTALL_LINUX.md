@@ -1,6 +1,6 @@
 # Linux 服务器安装与启动（Ubuntu 示例）
 
-2026-10-14 修复后的迁移、PDF 配置和验收限制见 [修复实施结果](REPAIR_RESULTS_20261014.md)。本轮未在 Linux 实机验收启停脚本。
+修复实施、开发验收及后续边界统一见 [开发验收总报告](ACCEPTANCE_RESULTS_20261017.md)，迁移和 PDF 配置可参考 [Windows 开发运行与维护](WINDOWS_DEVELOPMENT_OPERATIONS.md)。本轮未在 Linux 实机验收启停脚本，Windows 操作命令不能直接作为 Linux 验收依据。
 
 本说明采用“同机部署”：F1–F4、Spring Boot、MySQL 和 Nginx 位于同一台服务器。后端只监听回环地址，Nginx 是唯一公网入口。
 

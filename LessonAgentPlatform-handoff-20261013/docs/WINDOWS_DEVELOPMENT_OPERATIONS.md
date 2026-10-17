@@ -1,6 +1,6 @@
 # Windows 开发运行与维护
 
-本文汇总原三天专题文档中仍有效的操作内容，与[开发验收总报告](ACCEPTANCE_RESULTS_20261017.md)配套。首次安装见 [INSTALL_WINDOWS.md](INSTALL_WINDOWS.md)。约定环境是 Windows、每模块单实例，Java 是正式平台入口；内部引擎端口不作为公开服务。
+本文汇总 10 月 14 日修复报告及 15—17 日专题文档中仍有效的操作内容，与[开发验收总报告](ACCEPTANCE_RESULTS_20261017.md)配套。首次安装见 [INSTALL_WINDOWS.md](INSTALL_WINDOWS.md)。约定环境是 Windows、每模块单实例，Java 是正式平台入口；内部引擎端口不作为公开服务。
 
 ## 1. 日常启停与配置
 
@@ -124,15 +124,29 @@ Java 正常启动执行 Flyway；F4 在其 backend 及专用虚拟环境执行 `
 
 不得覆盖已发布/已执行历史 migration、关闭外键或删除 Flyway 历史来绕过错误。本轮隔离库的失败 V28 记录处置具有严格前提（V27 成功、V28 失败且未建表、已备份并核对身份），不是通用升级步骤。
 
-### 结构条件回退
+### 结构检查
 
-这只恢复指定审计对应的结构行，**不是数据库 schema 降级**；正文、父链、head、原稿不改。`structure-repair` profile 关闭 Flyway、调度和 backfill，因此必须在已完成迁移且已备份的数据库上执行。
+`structure-repair` profile 关闭 Flyway、调度和自动补录，执行结束自动退出，必须在已完成迁移且已备份的数据库上执行。检查不会自动把原稿认定为当前版本。
 
 以下命令位于 `Lessongen-main/web`。直接 `java -jar` 不会读取仓库根 `.env`；先在当前 PowerShell 设置并核验 `DB_URL`、`DB_USERNAME`、`DB_PASSWORD`，或使用已审核的 Spring 外部配置，明确指向目标隔离库且不回显密码。不能因为 `.env` 存在就认为已加载，也不要为加载配置而启动整套服务。先运行只读报告核对目标：
 
 ```powershell
 java -jar target/Lesoongen-0.0.1-SNAPSHOT.jar --spring.profiles.active=structure-repair --repair-report=structures.json --repair-audit-report=rollback-audits.json
 ```
+
+### 结构条件修复
+
+10 月 14 日修复报告中的正向修复入口继续有效。人工核对报告后准备 `reviewed-repairs.json`，内容为非空 JSON 数组，每项包含 `versionId`、`expectedContentSha256`、`expectedOldRawStructureSha256`（缺失结构为 null）、`documentPath` 和 `reason`。`documentPath` 相对于 manifest，替换结构的正文投影必须等于历史正文。在 `Lessongen-main/web` 执行：
+
+```powershell
+java -jar target/Lesoongen-0.0.1-SNAPSHOT.jar --spring.profiles.active=structure-repair --repair-apply=true --repair-manifest=reviewed-repairs.json --repair-report=after-repair.json
+```
+
+正文和旧结构摘要均须匹配，修复不改历史正文/head。逐项独立事务，失败停止后续项，已成功项保留审计；重跑前重新检查，摘要冲突不得强行覆盖。需要撤销结构修复时使用下述条件回退流程，不通过删列、改旧 migration 或直接切旧二进制回退。
+
+### 结构条件回退
+
+这只恢复指定审计对应的结构行，**不是数据库 schema 降级**；正文、父链、head、原稿不改。执行前同样须按上述结构检查要求完成备份、迁移和数据库配置核对。
 
 先核对只读报告，选 `eligible=true` 的审计及回退理由，写 `reviewed-rollbacks.json`：
 
