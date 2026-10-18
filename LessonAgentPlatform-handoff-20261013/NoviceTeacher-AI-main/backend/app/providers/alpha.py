@@ -26,4 +26,7 @@ class ContextOnlyMockProvider:
         current = fragments.get('current_section', context.user.get('section', {}))
         memory = fragments.get('session_memory', context.user.get('memory', {'rejected_suggestions': []}))
         legacy = context.model_copy(update={'user': {'memory': memory}})
-        return MockSuggestionProvider().generate({}, {}, {'current_content': current['content']}, legacy)
+        content = current.get('content')
+        if content is None:
+            content = '\n\n'.join(node['text'] for node in current.get('editable_nodes', []))
+        return MockSuggestionProvider().generate({}, {}, {'current_content': content}, legacy)

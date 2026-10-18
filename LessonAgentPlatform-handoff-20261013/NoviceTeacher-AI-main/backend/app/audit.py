@@ -30,7 +30,7 @@ class GenerationAudit:
             fragment_source_ids={f['contributor_type']: f['source_ids'] for f in fragments}, lesson_overview_id=overview,
             related_section_ids=refs('related_section_ids'), memory_reference_ids=refs('memory_reference_ids'),
             preference_ids=refs('preference_ids'), knowledge_ids=refs('knowledge_ids'), case_ids=refs('case_ids'),
-            prompt_version=cfg.get('prompt_version', 'legacy_v1'), model_provider=cfg.get('model_provider', cfg['provider']),
+            prompt_version=context.user.get('prompt_version', cfg.get('prompt_version', 'legacy_v1')), model_provider=cfg.get('model_provider', cfg['provider']),
             model_name=cfg['model'], system_config_version=cfg['version'], context_json=context.model_dump(mode='json'))
         return generation
 

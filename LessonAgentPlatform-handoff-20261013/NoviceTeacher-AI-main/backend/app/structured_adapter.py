@@ -7,6 +7,8 @@ from uuid import uuid4
 from .providers.interfaces import SectionDraft
 from .providers.defaults import DefaultRevisionStrategy
 from .chapter_sections import heading, main_headings
+from .structured_edits import (apply_edits, editable_nodes, legacy_paragraph_replacement,
+                               legacy_row_replacement, looks_like_table_row)
 
 
 def normalize(value):
@@ -176,6 +178,8 @@ def _revise_chapter(document, source_ref, previous, suggestion):
     updated = deepcopy(document)
     blocks = chapter_blocks(updated, source_ref)
     if suggestion.revision_mode == 'append':
+        if any(block.get('tableRows') and looks_like_table_row(suggestion.revision, block) for block in blocks):
+            raise ValueError('TABLE_EDIT_REQUIRES_TARGET')
         added = {'id': 'f4-' + uuid4().hex, 'type': 'paragraph', 'text': suggestion.revision.strip()}
         index = updated['blocks'].index(blocks[-1]) + 1
         updated['blocks'].insert(index, added)
@@ -186,6 +190,15 @@ def _revise_chapter(document, source_ref, previous, suggestion):
     if not target or previous.count(target) != 1:
         raise ValueError('UNMAPPABLE_SECTION_EDIT')
     start, end = previous.index(target), previous.index(target) + len(target)
+    row_edit = legacy_row_replacement(updated, blocks, start, end, suggestion.revision)
+    if row_edit is not None:
+        block, row_index, values = row_edit
+        block['tableRows'][row_index] = values
+        _refresh_teaching_row(block, row_index)
+        validate(updated)
+        return updated
+    if legacy_paragraph_replacement(updated, source_ref, blocks, start, end, suggestion.revision):
+        return updated
     for block, path, offset, raw, boundaries in _chapter_leaves(updated, blocks):
         if start - offset not in boundaries or end - offset not in boundaries:
             continue
@@ -232,6 +245,10 @@ def revise(document, source_ref, previous, content, suggestion=None):
     if source_ref.get('blockIds'):
         if suggestion is None:
             raise ValueError('CHAPTER_REVISION_REQUIRES_TARGET')
+        if chapter_content(document, source_ref) != previous:
+            raise ValueError('STALE_CHAPTER_CONTENT')
+        if getattr(suggestion, 'edits', None):
+            return apply_edits(document, source_ref, suggestion.edits)
         # Honor the configured strategy's effective edit, including append-only experiments.
         if content == DefaultRevisionStrategy().apply(previous, suggestion):
             suggestion = suggestion.model_copy(update={'revision_mode': 'append'})

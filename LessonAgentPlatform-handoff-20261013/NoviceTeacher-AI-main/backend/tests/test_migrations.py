@@ -20,6 +20,7 @@ def test_sqlite_migration_upgrade_and_schema(tmp_path, monkeypatch):
     assert len(inspect(engine).get_check_constraints('decisions')) == 1
     assert {'structured_content', 'content_format', 'format_provenance', 'structure_warnings'} <= {
         column['name'] for column in inspect(engine).get_columns('lesson_plan_versions')}
+    assert next(column for column in inspect(engine).get_columns('suggestions') if column['name'] == 'edits')['nullable']
     command.check(cfg)
     engine.dispose()
 

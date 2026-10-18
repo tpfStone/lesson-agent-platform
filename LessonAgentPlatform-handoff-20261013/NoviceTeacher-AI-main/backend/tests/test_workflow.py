@@ -1,4 +1,5 @@
 from concurrent.futures import ThreadPoolExecutor
+import threading
 from uuid import uuid4
 import pytest
 from fastapi.testclient import TestClient
@@ -140,14 +141,35 @@ def test_validation_ownership_and_view_log(client):
             'subject': '数学', 'grade': '三', 'topic': '分数'}, 'content': content}).status_code == 422
 
 
-def test_concurrent_generation_and_decision(client):
+def test_concurrent_generation_and_decision(client, monkeypatch):
+    from app.providers.defaults import MockSuggestionProvider
+
     state, _ = create(client, '教学目标\n理解分数')
     sid = state['session']['id']
+    entered, release = threading.Event(), threading.Event()
+    original = MockSuggestionProvider.generate
+    def held_generation(self, *args, **kwargs):
+        entered.set()
+        assert release.wait(5)
+        return original(self, *args, **kwargs)
+    monkeypatch.setattr(MockSuggestionProvider, 'generate', held_generation)
     with ThreadPoolExecutor(max_workers=2) as pool:
-        results = list(pool.map(lambda _: client.post(f'/api/sessions/{sid}/suggestions', json=target(state)), range(2)))
-    assert all(r.status_code == 200 for r in results)
-    assert results[0].json() == results[1].json()
-    generated = results[0].json()
+        pending = pool.submit(client.post, f'/api/sessions/{sid}/suggestions', json=target(state))
+        assert entered.wait(2)
+        try:
+            # A durable generation claim returns 409 while the model is running;
+            # once saved, repeating the request returns the same generated state.
+            overlap = client.post(f'/api/sessions/{sid}/suggestions', json=target(state))
+            assert overlap.status_code == 409, overlap.text
+            assert '正在生成建议' in overlap.json()['detail']
+        finally:
+            release.set()
+        completed = pending.result(timeout=5)
+    assert completed.status_code == 200, completed.text
+    repeated = client.post(f'/api/sessions/{sid}/suggestions', json=target(state))
+    assert repeated.status_code == 200
+    assert completed.json() == repeated.json()
+    generated = completed.json()
     suggestion = current(generated)['suggestions'][0]
     with ThreadPoolExecutor(max_workers=2) as pool:
         results = list(pool.map(lambda _: client.post(f"/api/sessions/{sid}/suggestions/{suggestion['id']}/decision",

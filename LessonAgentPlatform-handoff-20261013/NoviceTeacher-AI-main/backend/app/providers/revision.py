@@ -8,6 +8,8 @@ class AppendRevisionStrategy:
 
 
 class ReplaceOrAppendRevisionStrategy:
+    supports_structured_edits = True
+
     def apply(self, current_text, suggestion):
         if suggestion.revision_mode == 'append':
             return AppendRevisionStrategy().apply(current_text, suggestion)

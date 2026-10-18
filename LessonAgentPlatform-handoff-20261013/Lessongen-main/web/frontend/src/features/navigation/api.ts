@@ -137,5 +137,6 @@ export interface NavigationState {
     reason: string;
     candidate: string;
     expected_version_id: string;
+    can_append?: boolean;
   };
 }

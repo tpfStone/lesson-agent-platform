@@ -11,6 +11,7 @@ from ..contributors import (LessonContextContributor, RuleBasedContextPolicy, Se
     KnowledgeRetrievalContributor, PreferenceContributor, NoPreferenceProvider)
 from ..retrieval import MetadataRetriever, NoOpRetriever
 from ..chapter_sections import ChapterSectionParser
+from ..context import PROMPT_VERSION
 
 
 @dataclass(frozen=True)
@@ -62,7 +63,7 @@ class ExperimentConfigFactory:
             'section_parser': cfg.section_parser, 'revision': cfg.revision_strategy, 'memory': cfg.memory_provider,
             'case_retriever': cfg.case_retriever, 'knowledge_retriever': cfg.knowledge_retriever,
             'retrieval_top_k': cfg.retrieval_top_k, 'auth_provider': cfg.auth_provider,
-            'max_rounds': 5, 'enable_active_inquiry': False, 'prompt_version': 'alpha_v2'}
+            'max_rounds': 5, 'enable_active_inquiry': False, 'prompt_version': PROMPT_VERSION}
 
     def build(self, snapshot, history_reader):
         providers = {'mock': lambda: ContextOnlyMockProvider(),

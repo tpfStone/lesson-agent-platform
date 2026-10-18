@@ -1,7 +1,7 @@
 """Stable workflow. Every mutation runs under a DB transaction and session lock.
 
-PostgreSQL locks one session row; local SQLite uses BEGIN IMMEDIATE. The bounded
-LLM call deliberately holds that lock in this MVP to prevent duplicate generations.
+PostgreSQL locks one session row; local SQLite uses BEGIN IMMEDIATE. A durable
+generation claim prevents duplicate model calls while the transaction is released.
 """
 import hashlib
 import json
@@ -261,6 +261,14 @@ class Workflow:
         sections = self.sections(section.lesson_plan_id)
         overview = self.ensure_overview(session, sections)
         snapshots = [{**dump(s), 'version_id': self.latest(s.id).id} for s in sections]
+        lesson = self.one(m.LessonPlan, session_id=session.id)
+        if lesson.structured_content is not None and (section.source_ref or {}).get('blockIds'):
+            chapter_blocks = structured_adapter.chapter_blocks(lesson.structured_content, section.source_ref)
+            # A legacy table has no stable cell addresses. Keep its complete text
+            # visible to the model instead of silently omitting its contents.
+            if all(not b.get('tableRows') or b.get('rowIds') for b in chapter_blocks):
+                next(s for s in snapshots if s['id'] == section.id)['editable_nodes'] = (
+                    structured_adapter.editable_nodes(lesson.structured_content, section.source_ref))
         request = ContextBuildRequest(user_id=self.current_user.id, session=dump(session), round=dump(round),
             section=next(s for s in snapshots if s['id'] == section.id), all_sections=snapshots, overview=dump(overview))
         config = self.config(session)
@@ -292,7 +300,28 @@ class Workflow:
             audit.failed(generation, failure)
             return failure
         try:
+            # Validate every structured operation before saving any suggestion. A retry
+            # must not inherit half a batch or an append disguised as a table rewrite.
+            for draft in suggestions:
+                strategy = self.config(session).revision_strategy
+                if draft.edits and not getattr(strategy, 'supports_structured_edits', False):
+                    raise ValueError('STRUCTURED_EDITS_UNSUPPORTED_BY_STRATEGY')
+                if draft.edits or draft.revision_mode == 'append':
+                    lesson = self.one(m.LessonPlan, session_id=session.id)
+                    if (section.source_ref or {}).get('blockIds') and lesson.structured_content is not None:
+                        source = deepcopy(section.source_ref)
+                        result = strategy.apply(section.current_content, draft)
+                        structured_adapter.revise(lesson.structured_content, source,
+                            section.current_content, result.content, draft)
+                    elif draft.edits:
+                        raise ValueError('CHAPTER_STRUCTURE_UNAVAILABLE')
             audit.completed(generation, suggestions, getattr(config.suggestion_provider, 'last_raw', None))
+        except ValueError as error:
+            failure = ProviderError('INVALID_STRUCTURED_REVISION',
+                '模型建议的修改位置或内容结构不一致，正文未改变，请重新生成建议。',
+                {'reason': str(error), 'response': getattr(config.suggestion_provider, 'last_raw', None)})
+            audit.failed(generation, failure)
+            return failure
         except ProviderError as error:
             audit.failed(generation, error)
             return error
@@ -313,19 +342,27 @@ class Workflow:
         content = section.current_content
         prepared_document = prepared_source = None
         if decision == 'ACCEPT':
-            draft = SuggestionDraft(**{key: getattr(suggestion, key) for key in SuggestionDraft.model_fields})
+            values = {key: getattr(suggestion, key) for key in SuggestionDraft.model_fields}
+            values['edits'] = values.get('edits') or []  # Pre-migration suggestions remain readable.
+            draft = SuggestionDraft(**values)
+            chapter = bool((section.source_ref or {}).get('blockIds'))
             if confirm_append:
+                if chapter and (draft.revision_mode == 'replace' or draft.edits):
+                    raise WorkflowError('这条建议用于替换已有内容，不能改为章节补充。请保留原稿。')
                 if expected_version_id != self.latest(section.id).id:
                     raise WorkflowError('正文已变化，请恢复最新状态后重新确认。')
                 draft = draft.model_copy(update={'revision_mode': 'append'})
-            result = self.config(session).revision_strategy.apply(section.current_content, draft)
-            if result.status == 'candidate':
-                self.event(session, 'REVISION_CANDIDATE_SHOWN', {'suggestion_id': suggestion.id,
-                    'candidate': result.candidate, 'reason': result.reason}, round.id, section.id)
-                return {'suggestion_id': suggestion.id, 'candidate': result.candidate, 'reason': result.reason,
-                        'expected_version_id': self.latest(section.id).id}
+            strategy = self.config(session).revision_strategy
+            if draft.edits and not getattr(strategy, 'supports_structured_edits', False):
+                return self.revision_candidate(session, round, section, suggestion,
+                    '此会话的修订方式不支持这条修改，正文未改变。请保留原稿。',
+                    can_append=False, code='STRUCTURED_EDITS_UNSUPPORTED_BY_STRATEGY')
+            result = strategy.apply(section.current_content, draft)
+            if result.status == 'candidate' and not draft.edits:
+                return self.revision_candidate(session, round, section, suggestion,
+                    result.reason, can_append=not chapter)
             content = result.content
-            if content != section.current_content and (section.source_ref or {}).get('blockIds'):
+            if chapter and (draft.edits or content != section.current_content):
                 lesson = self.one(m.LessonPlan, session_id=session.id)
                 prepared_source = {**section.source_ref, 'blockIds': list(section.source_ref['blockIds'])}
                 try:
@@ -334,12 +371,20 @@ class Workflow:
                     prepared_document = structured_adapter.revise(lesson.structured_content,
                         prepared_source, section.current_content, content, draft)
                     content = structured_adapter.chapter_content(prepared_document, prepared_source)
-                except ValueError:
-                    reason = '这条修改无法准确定位到单个段落、列表项或表格单元格。可保留原文，将建议补充到本章节末尾。'
-                    self.event(session, 'REVISION_CANDIDATE_SHOWN', {'suggestion_id': suggestion.id,
-                        'candidate': draft.revision, 'reason': reason}, round.id, section.id)
-                    return {'suggestion_id': suggestion.id, 'candidate': draft.revision, 'reason': reason,
-                            'expected_version_id': self.latest(section.id).id}
+                except ValueError as error:
+                    reasons = {
+                        'STALE_STRUCTURED_EDIT': '对应原文已被其他建议修改，整条建议未应用。请保留当前正文。',
+                        'STALE_CHAPTER_CONTENT': '章节正文已变化，整条建议未应用。请恢复最新状态。',
+                        'SERIALIZED_ROW_IN_CELL': '建议把整行表格内容放进了单个格子，未应用。请保留原稿。',
+                        'INVALID_ROW_REPLACEMENT': '表格修改的行或列无法准确对应，未应用。请保留原稿。',
+                        'EDIT_OUTSIDE_CHAPTER': '建议涉及当前单元以外的内容，未应用。请保留原稿。',
+                    }
+                    return self.revision_candidate(session, round, section, suggestion,
+                        reasons.get(str(error), '这条建议的修改范围无法准确对应原文，整条建议未应用。请保留原稿。'),
+                        can_append=False, code=str(error))
+            elif draft.edits:
+                return self.revision_candidate(session, round, section, suggestion,
+                    '此会话没有可核对的文档结构，无法应用这条修改。请保留原稿。', can_append=False)
         saved = self.add(m.Decision, suggestion_id=suggestion.id, session_id=session.id,
                          round_id=round.id, section_id=section.id, decision=decision)
         self.chat(session, 'user', decision, 'decision', section.id, suggestion.id)
@@ -376,6 +421,13 @@ class Workflow:
                     lesson.current_content = ''.join(s.current_content for s in self.sections(lesson.id))
                 self.event(session, 'SECTION_UPDATED', {'previous_version_id': previous.id, 'version_id': version.id,
                     'suggestion_id': suggestion.id, 'decision_id': saved.id}, round.id, section.id)
+
+    def revision_candidate(self, session, round, section, suggestion, reason, can_append, code=None):
+        candidate = {'suggestion_id': suggestion.id, 'candidate': suggestion.revision,
+            'reason': reason, 'can_append': can_append, 'code': code,
+            'expected_version_id': self.latest(section.id).id}
+        self.event(session, 'REVISION_CANDIDATE_SHOWN', candidate, round.id, section.id)
+        return candidate
 
     def complete_section(self, session, round_id, section_id):
         if session.status == 'TERMINATED':

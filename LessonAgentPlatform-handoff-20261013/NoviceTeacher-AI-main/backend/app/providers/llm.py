@@ -53,6 +53,17 @@ class GenericLLMSuggestionProvider:
             candidates = parsed['suggestions']
             if not isinstance(candidates, list) or len(candidates) > 2:
                 raise ValueError('Expected 0–2 suggestions')
-            return [SuggestionDraft.model_validate(item) for item in candidates]
+            suggestions = [SuggestionDraft.model_validate(item) for item in candidates]
+            structured = any(f.get('contributor_type') == 'current_section'
+                and 'editable_nodes' in f.get('content', {}) for f in context.user.get('fragments', []))
+            for draft in suggestions:
+                if structured and draft.revision_mode == 'replace' and not draft.edits:
+                    raise ValueError('Structured replacements must specify node edits')
+                if structured and draft.revision_mode == 'append' and draft.target_text:
+                    raise ValueError('An independent addition cannot target existing text')
+            # Preview the actual replacement values, never a separate model-written
+            # summary that could disagree with the edits the teacher will accept.
+            return [draft.model_copy(update={'revision': '\n\n'.join(edit.text for edit in draft.edits)})
+                    if draft.edits else draft for draft in suggestions]
         except (KeyError, IndexError, TypeError, ValueError, ValidationError) as exc:
-            raise ProviderError('MALFORMED_LLM_OUTPUT', '模型返回格式不符合 0–2 条建议约定，未应用任何修改，请重试。', self.last_raw) from exc
+            raise ProviderError('MALFORMED_LLM_OUTPUT', '模型返回的建议格式或修改定位不完整，未应用任何修改，请重新生成建议。', self.last_raw) from exc

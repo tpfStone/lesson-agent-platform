@@ -42,16 +42,42 @@ const savedId = ref(
   queryId() || localStorage.getItem(storagePrefix + "session") || "",
 );
 const selectedVersion = ref<number | null>(null);
+const viewedSectionId = ref<string | null>(null);
 let disposed = false;
+let requestedSessionId = "";
 
 onBeforeUnmount(() => {
   disposed = true;
 });
 
-const current = computed(() =>
+const pending = computed(() =>
   state.value?.sections.find(
     (section) => section.id === state.value?.session.current_section_id,
   ),
+);
+const current = computed(() =>
+  viewedSectionId.value
+    ? state.value?.sections.find(
+        (section) => section.id === viewedSectionId.value,
+      )
+    : pending.value,
+);
+const lookingBack = computed(() => viewedSectionId.value !== null);
+const previous = computed(
+  () =>
+    state.value?.sections
+      .filter(
+        (section) =>
+          section.review.completed_at &&
+          section.order_index < (current.value?.order_index ?? 0),
+      )
+      .sort((a, b) => b.order_index - a.order_index)[0],
+);
+const lastCompleted = computed(
+  () =>
+    state.value?.sections
+      .filter((section) => section.review.completed_at)
+      .sort((a, b) => b.order_index - a.order_index)[0],
 );
 const status = computed(() => state.value?.session.status);
 const maxRounds = computed(
@@ -64,6 +90,7 @@ const completed = computed(
 );
 const canNext = computed(() =>
   Boolean(
+    !lookingBack.value &&
     current.value?.review.generated_at &&
     current.value.suggestions.every((suggestion) => suggestion.decision),
   ),
@@ -140,13 +167,14 @@ const rejectedCount = computed(
 );
 
 function target() {
-  if (!state.value || !current.value)
+  if (!state.value || !pending.value)
     throw new Error("当前没有可共析的教学单元，请恢复最新状态。");
-  return { round_id: state.value.round.id, section_id: current.value.id };
+  return { round_id: state.value.round.id, section_id: pending.value.id };
 }
 
 function persistState(data: NavigationState) {
   state.value = data;
+  viewedSectionId.value = null;
   savedId.value = data.session.id;
   localStorage.setItem(storagePrefix + "session", data.session.id);
   if (!disposed && queryId() !== data.session.id) {
@@ -162,7 +190,8 @@ async function logView() {
   if (!current.value || disposed) return;
   try {
     await request(path.value + "/view", {
-      ...target(),
+      round_id: state.value!.round.id,
+      section_id: current.value.id,
       section_version_id: current.value.version.id,
       suggestion_ids: current.value.suggestions.map(
         (suggestion) => suggestion.id,
@@ -174,6 +203,22 @@ async function logView() {
   } catch {
     notice.value = "当前正文与选择已恢复；查看记录暂未写入，不影响继续共析。";
   }
+}
+
+async function viewSection(id: string | null) {
+  if (busy.value) return;
+  if (
+    id !== null &&
+    id !== pending.value?.id &&
+    !state.value?.sections.some(
+      (section) => section.id === id && section.review.completed_at,
+    )
+  )
+    return;
+  viewedSectionId.value = id === pending.value?.id ? null : id;
+  error.value = "";
+  notice.value = "";
+  await logView();
 }
 
 async function run(action: () => Promise<void>) {
@@ -190,30 +235,38 @@ async function run(action: () => Promise<void>) {
   }
 }
 
-async function recover(id = savedId.value) {
-  if (!id.trim()) return;
+async function recover(id = queryId() || savedId.value) {
+  if (!id.trim() || busy.value) return;
+  requestedSessionId = id.trim();
   await run(async () => {
-    persistState(
-      await request<NavigationState>(
-        "/sessions/" + encodeURIComponent(id.trim()) + "/current-state",
-      ),
+    const requestedRoute = queryId();
+    const data = await request<NavigationState>(
+      "/sessions/" + encodeURIComponent(id.trim()) + "/current-state",
     );
+    if (disposed || queryId() !== requestedRoute) return;
+    persistState(data);
     selectedVersion.value = null;
     await logView();
   });
 }
 
 async function mutate(suffix: string, body: unknown = {}) {
+  if (lookingBack.value || (queryId() && queryId() !== state.value?.session.id))
+    return;
   await run(async () => {
-    persistState(await request<NavigationState>(path.value + suffix, body));
+    const requestedRoute = queryId();
+    const data = await request<NavigationState>(path.value + suffix, body);
+    if (disposed || queryId() !== requestedRoute) return;
+    persistState(data);
     selectedVersion.value = null;
     await logView();
   });
 }
 
 function startNewSession() {
-  if (busy.value) return;
+  if (busy.value || lookingBack.value) return;
   state.value = null;
+  viewedSectionId.value = null;
   selectedVersion.value = null;
   error.value = "";
   notice.value = "";
@@ -278,18 +331,20 @@ const resultFiles = computed<DownloadFile[]>(() => {
   ];
 });
 
-watch(
-  () => route.query.session,
-  (id) => {
-    if (
-      typeof id === "string" &&
-      id !== state.value?.session.id &&
-      !booting.value &&
-      !busy.value
-    )
-      void recover(id);
-  },
-);
+watch([() => route.query.session, busy, booting], ([id], [previousId]) => {
+  if (id !== previousId) {
+    requestedSessionId = "";
+    viewedSectionId.value = null;
+  }
+  if (
+    typeof id === "string" &&
+    id !== state.value?.session.id &&
+    id !== requestedSessionId &&
+    !booting.value &&
+    !busy.value
+  )
+    void recover(id);
+});
 
 onMounted(async () => {
   if (savedId.value) await recover();
@@ -387,7 +442,10 @@ onMounted(async () => {
           </div>
         </nav>
 
-        <div v-if="status === 'ACTIVE' && current" class="review-layout">
+        <div
+          v-if="current && (status === 'ACTIVE' || lookingBack)"
+          class="review-layout"
+        >
           <aside class="section-nav v2-card">
             <div class="section-nav-heading">
               <div><small>共析单元</small><strong>逐节共析</strong></div>
@@ -408,22 +466,56 @@ onMounted(async () => {
                   completed: section.review.completed_at,
                 }"
               >
-                <span>{{ section.review.completed_at ? "✓" : index + 1 }}</span>
-                <span>{{ section.title }}</span>
+                <button
+                  type="button"
+                  :disabled="
+                    busy ||
+                    (!section.review.completed_at && section.id !== pending?.id)
+                  "
+                  :aria-current="section.id === current.id ? 'step' : undefined"
+                  @click="viewSection(section.id)"
+                >
+                  <span aria-hidden="true">{{
+                    section.review.completed_at ? "✓" : index + 1
+                  }}</span>
+                  <span>{{ section.title }}</span>
+                </button>
               </li>
             </ol>
-            <p v-if="current.source_ref?.blockIds">
-              每个大标题及其下的内容合为一个单元，完成取舍后继续下一节。
-            </p>
-            <p v-else>按顺序完成每个单元，已完成的决定会自动保存。</p>
           </aside>
 
           <div class="review-main">
+            <div v-if="lookingBack || previous" class="review-navigation">
+              <el-tag v-if="lookingBack" type="info" effect="plain"
+                >已完成 · 回看中</el-tag
+              >
+              <div class="review-navigation-actions">
+                <el-button
+                  v-if="previous"
+                  :disabled="busy"
+                  @click="viewSection(previous.id)"
+                  >回看上一单元</el-button
+                >
+                <el-button
+                  v-if="lookingBack"
+                  :disabled="busy"
+                  @click="viewSection(null)"
+                  >{{
+                    pending
+                      ? "返回当前单元"
+                      : status === "TERMINATED"
+                        ? "返回最终结果"
+                        : "返回本轮结果"
+                  }}</el-button
+                >
+              </div>
+            </div>
             <section class="lesson-section v2-card">
               <div class="section-heading">
                 <div>
                   <small
-                    >当前单元 {{ current.order_index + 1 }} /
+                    >{{ lookingBack ? "回看单元" : "当前单元" }}
+                    {{ current.order_index + 1 }} /
                     {{ state.sections.length }}</small
                   >
                   <h2>{{ current.title }}</h2>
@@ -445,7 +537,13 @@ onMounted(async () => {
               <div class="feedback-heading">
                 <div>
                   <small>共析建议</small>
-                  <h2>针对当前单元的修改意见</h2>
+                  <h2>
+                    {{
+                      lookingBack
+                        ? "本单元的建议与选择"
+                        : "针对当前单元的修改意见"
+                    }}
+                  </h2>
                 </div>
                 <el-tag
                   v-if="current.review.generated_at"
@@ -456,7 +554,7 @@ onMounted(async () => {
               </div>
 
               <div
-                v-if="!current.review.generated_at"
+                v-if="!lookingBack && !current.review.generated_at"
                 class="generate-box v2-card"
               >
                 <div>
@@ -478,7 +576,7 @@ onMounted(async () => {
                 class="empty-suggestions v2-card"
               >
                 <strong>本单元暂无新增建议</strong>
-                <p>可以保留当前内容并继续下一个单元。</p>
+                <p v-if="!lookingBack">可以保留当前内容并继续下一个单元。</p>
               </div>
 
               <article
@@ -540,8 +638,16 @@ onMounted(async () => {
                   <dd class="revision-text">{{ suggestion.revision }}</dd>
                 </dl>
 
-                <div v-if="!suggestion.decision" class="decision-actions">
+                <div
+                  v-if="!lookingBack && !suggestion.decision"
+                  class="decision-actions"
+                >
                   <el-button
+                    v-if="
+                      state.revision_candidate?.suggestion_id !==
+                        suggestion.id ||
+                      state.revision_candidate.can_append !== false
+                    "
                     type="primary"
                     :disabled="busy"
                     @click="
@@ -561,25 +667,34 @@ onMounted(async () => {
                     >保留原稿</el-button
                   >
                   <span>{{
-                    suggestion.revision_mode === "replace"
-                      ? "采纳后仅在定位明确时替换正文"
-                      : "采纳后补充到当前单元"
+                    state.revision_candidate?.suggestion_id === suggestion.id &&
+                    state.revision_candidate.can_append === false
+                      ? "本条修改未应用，原稿已保留"
+                      : suggestion.revision_mode === "replace"
+                        ? "采纳后仅在定位明确时替换正文"
+                        : "采纳后补充到当前单元"
                   }}</span>
                 </div>
 
                 <div
                   v-if="
+                    !lookingBack &&
                     state.revision_candidate?.suggestion_id === suggestion.id &&
                     !suggestion.decision
                   "
                   class="candidate-box"
                 >
-                  <strong>需要你确认补充方式</strong>
+                  <strong>{{
+                    state.revision_candidate.can_append === false
+                      ? "无法应用此修改"
+                      : "需要你确认补充方式"
+                  }}</strong>
                   <p>{{ state.revision_candidate.reason }}</p>
                   <pre class="lesson-text">{{
                     state.revision_candidate.candidate
                   }}</pre>
                   <el-button
+                    v-if="state.revision_candidate.can_append !== false"
                     :disabled="busy"
                     @click="
                       mutate('/suggestions/' + suggestion.id + '/decision', {
@@ -595,7 +710,7 @@ onMounted(async () => {
               </article>
             </section>
 
-            <div class="next-bar">
+            <div v-if="!lookingBack" class="next-bar">
               <p>
                 {{
                   canNext
@@ -620,7 +735,7 @@ onMounted(async () => {
         </div>
 
         <section
-          v-if="status === 'ROUND_COMPLETED'"
+          v-if="status === 'ROUND_COMPLETED' && !lookingBack"
           class="round-complete v2-card"
         >
           <span class="complete-icon">✓</span>
@@ -631,6 +746,13 @@ onMounted(async () => {
             个教学单元均已完成查看和取舍。你可以继续下一轮，也可以结束本次共析。
           </p>
           <div class="round-actions">
+            <el-button
+              v-if="lastCompleted"
+              size="large"
+              :disabled="busy"
+              @click="viewSection(lastCompleted.id)"
+              >回看已完成单元</el-button
+            >
             <el-button
               size="large"
               :disabled="busy"
@@ -649,7 +771,10 @@ onMounted(async () => {
         </section>
 
         <section
-          v-if="status === 'ROUND_COMPLETED' || status === 'TERMINATED'"
+          v-if="
+            !lookingBack &&
+            (status === 'ROUND_COMPLETED' || status === 'TERMINATED')
+          "
           class="final-panel v2-card"
         >
           <div class="section-heading">
@@ -680,6 +805,12 @@ onMounted(async () => {
               />
             </el-select>
           </div>
+          <el-button
+            v-if="status === 'TERMINATED' && lastCompleted"
+            :disabled="busy"
+            @click="viewSection(lastCompleted.id)"
+            >回看已完成单元</el-button
+          >
           <LessonDocumentPreview
             :document="finalDocument"
             :warnings="finalWarnings"
@@ -687,19 +818,26 @@ onMounted(async () => {
         </section>
 
         <NavigationTransferPanel
-          v-if="status === 'ROUND_COMPLETED' || status === 'TERMINATED'"
+          v-if="
+            !lookingBack &&
+            (status === 'ROUND_COMPLETED' || status === 'TERMINATED')
+          "
           :state="state"
           :disabled="busy"
         />
 
         <ResultDownloadPanel
-          v-if="status === 'TERMINATED'"
+          v-if="status === 'TERMINATED' && !lookingBack"
           :files="resultFiles"
           description="本次协同共析已经完成，可下载最终修订稿和教师可读的建议摘要。"
         />
 
         <div
-          v-if="status === 'TERMINATED' && route.query.workflow !== '1'"
+          v-if="
+            status === 'TERMINATED' &&
+            !lookingBack &&
+            route.query.workflow !== '1'
+          "
           class="finished-actions"
         >
           <el-button @click="startNewSession">开始新的协同共析</el-button>

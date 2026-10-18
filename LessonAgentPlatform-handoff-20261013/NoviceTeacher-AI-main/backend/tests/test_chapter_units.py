@@ -216,7 +216,7 @@ def test_append_to_table_chapter_keeps_table_and_places_new_paragraph_before_nex
     assert current(state)['title'] == '二、作业设计'
 
 
-def test_cross_cell_replacement_requires_confirmation_and_preserves_table(environment):
+def test_ambiguous_cross_cell_replacement_cannot_be_appended_and_preserves_table(environment):
     sessions, factory = environment
     build = factory.build
     class Provider:
@@ -233,11 +233,13 @@ def test_cross_cell_replacement_requires_confirmation_and_preserves_table(enviro
         assert current(state)['suggestions'][0]['decision'] is None
         assert state['lesson_plan']['structured_content'] == doc
         candidate = state['revision_candidate']
-        state = post(client, state, f"/suggestions/{suggestion['id']}/decision", {
-            'decision': 'ACCEPT', 'confirm_append': True, 'expected_version_id': candidate['expected_version_id']})
+        assert candidate['can_append'] is False
+        post(client, state, f"/suggestions/{suggestion['id']}/decision", {
+            'decision': 'ACCEPT', 'confirm_append': True, 'expected_version_id': candidate['expected_version_id']}, expected=409)
+        state = post(client, state, f"/suggestions/{suggestion['id']}/decision", {'decision': 'REJECT'})
         assert state['lesson_plan']['structured_content']['blocks'][3] == doc['blocks'][3]
-        assert current(state)['suggestions'][0]['decision']['decision'] == 'ACCEPT'
-        assert '组织合作拼图' in current(state)['current_content']
+        assert current(state)['suggestions'][0]['decision']['decision'] == 'REJECT'
+        assert '组织合作拼图' not in current(state)['current_content']
 
 
 def test_chapters_honor_append_only_revision_configuration(environment):

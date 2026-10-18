@@ -158,6 +158,7 @@ class Suggestion(Owned, Record, Base):
     confidence: Mapped[float | None]
     target_text: Mapped[str | None] = mapped_column(Text)
     revision_mode: Mapped[str] = mapped_column(String(20), default='append')
+    edits: Mapped[list | None] = mapped_column(json_type, default=list)
     knowledge_ids: Mapped[list] = mapped_column(json_type, default=list)
     basis_sources: Mapped[list] = mapped_column(json_type, default=list)
 

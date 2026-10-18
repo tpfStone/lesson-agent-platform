@@ -1,6 +1,6 @@
 """Research contracts: providers receive plain snapshots, never a live DB session."""
 from typing import Protocol, Any, Literal
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, model_validator
 
 
 class SectionDraft(BaseModel):
@@ -17,6 +17,30 @@ class KnowledgeItem(BaseModel):
     score: float | None = None
 
 
+class StructuredEdit(BaseModel):
+    """Full raw node values; JSON decoding is the only escaping layer."""
+    model_config = ConfigDict(extra='forbid')
+    operation: Literal['replace', 'insert_after'] = 'replace'
+    block_id: str = Field(min_length=1, max_length=200)
+    row_id: str | None = Field(default=None, min_length=1, max_length=200)
+    column_index: StrictInt | None = Field(default=None, ge=0)
+    item_index: StrictInt | None = Field(default=None, ge=0)
+    expected_text: str = Field(max_length=8000)
+    text: str = Field(max_length=8000)
+
+    @model_validator(mode='after')
+    def valid_address(self):
+        if (self.row_id is None) != (self.column_index is None):
+            raise ValueError('row_id and column_index must be supplied together')
+        if self.row_id is not None and self.item_index is not None:
+            raise ValueError('A target cannot be both a cell and a list item')
+        if self.operation == 'insert_after' and (self.row_id is not None or self.item_index is not None):
+            raise ValueError('Insertions must anchor a paragraph block')
+        if self.operation == 'insert_after' and not self.text.strip():
+            raise ValueError('An inserted paragraph cannot be empty')
+        return self
+
+
 class SuggestionDraft(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, extra='forbid')
     issue: str = Field(min_length=1, max_length=4000)
@@ -30,7 +54,14 @@ class SuggestionDraft(BaseModel):
     confidence: float | None = Field(default=None, ge=0, le=1)
     revision_mode: Literal['append', 'replace'] = 'append'
     target_text: str | None = None
+    edits: list[StructuredEdit] = Field(default_factory=list, max_length=40)
     knowledge_ids: list[str] = Field(default_factory=list)
+
+    @model_validator(mode='after')
+    def structured_mode(self):
+        if self.edits and self.revision_mode != 'replace':
+            raise ValueError('Node edits must use replace mode; append is for independent additions')
+        return self
 
 
 class MemoryContext(BaseModel):
